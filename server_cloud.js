@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR CLOUD - IA DÄMEK FINAL COMPLET
-// Gamma: 0.99 | Alpha: 0.25 | Historique cumulatif | Analyse STABLE sans boucle
+// 🤖 SERVEUR CLOUD - IA DÄMEK FINAL
+// Avec page analyse VRAIMENT STABLE
 
 const express = require('express');
 const fs = require('fs');
@@ -231,12 +231,295 @@ app.get('/api/stats', (req, res) => {
   res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.history.length, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY } });
 });
 
+// PAGE ANALYSE - HTML SIMPLE ET FONCTIONNEL
 app.get('/analyse', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>📊 Analyse</title><script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"><\/script><style>body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}h1{text-align:center;color:#4cc9f0}.container{max-width:1200px;margin:0 auto}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin:20px 0}.stat{background:#0f3460;padding:15px;border-radius:8px;border:1px solid #4cc9f0;text-align:center}.stat-val{font-size:2em;font-weight:bold;color:#4cc9f0}.stat-lbl{color:#aaa;font-size:0.9em}.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:20px;margin:20px 0}.chart{background:#0f3460;padding:15px;border-radius:8px;border:1px solid #4cc9f0;height:300px}.loading{text-align:center;padding:40px;color:#4cc9f0}</style></head><body><div class="container"><h1>📊 Analyse Entraînement</h1><div id="stats"></div><div id="charts"></div></div><script>let charts={};function show(n,s){const h='<div class="stats"><div class="stat"><div class="stat-val">'+s.winRate+'%<\/div><div class="stat-lbl">Victoires<\/div><\/div><div class="stat"><div class="stat-val">'+n.totalHistoryLength+'<\/div><div class="stat-lbl">Parties<\/div><\/div><div class="stat"><div class="stat-val">'+s.ai1_states.toLocaleString()+'<\/div><div class="stat-lbl">États<\/div><\/div><div class="stat"><div class="stat-val">'+s.epsilon+'<\/div><div class="stat-lbl">Epsilon<\/div><\/div><\/div>';document.getElementById('stats').innerHTML=h}function draw(h){if(!h||h.length<1){document.getElementById('charts').innerHTML='<div class="loading">Pas de données<\/div>';return}const e=h.map(x=>x.episode),w=[],s=[],p=[];let n=0;h.forEach(x=>{if(x.winner===0)n++;w.push((n/h.length*100).toFixed(1));s.push(x.ai_states);p.push(parseFloat(x.epsilon))});const v=h.filter(x=>x.winner===0).length;const d=h.length-v;document.getElementById('charts').innerHTML='<canvas id="c1"><\/canvas><canvas id="c2"><\/canvas><canvas id="c3"><\/canvas><canvas id="c4"><\/canvas>';setTimeout(()=>{mk('c1','Victoires',e,w,'#4cc9f0');mk('c2','États',e,s,'#f72585');mk('c3','Epsilon',e,p,'#77dd77');mk('c4','Pie',[v,d],['Vic','Def'],['#4cc9f0','#f72585'])},100)}function mk(i,l,x,y,c){const f=document.getElementById(i);if(!f)return;if(charts[i])charts[i].destroy();const t='c4'===i?'doughnut':'line';charts[i]=new Chart(f,{type:t,data:{labels:x,datasets:[{label:l,data:y,borderColor:c,backgroundColor:c+'33',borderWidth:2,fill:true,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#fff'}}},scales:{y:{ticks:{color:'#fff'},grid:{color:'rgba(255,255,255,0.1)'}},x:{ticks:{color:'#fff'},grid:{color:'rgba(255,255,255,0.1)'}}}})})} async function load(){try{const r1=await fetch('/api/train/status');const s1=await r1.json();const r2=await fetch('/api/train/history');const h=await r2.json();const r3=await fetch('/api/stats');const s2=await r3.json();show(s1,s2);draw(h)}catch(e){document.getElementById('stats').innerHTML='<div style="color:#ff6464">Erreur: '+e.message+'<\/div>'}}load();const timer=setInterval(load,5000);<\/script><\/body><\/html>`);
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analyse Damek</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial, sans-serif; background: #1a1a2e; color: #fff; padding: 20px; }
+.container { max-width: 1200px; margin: 0 auto; }
+h1 { text-align: center; color: #4cc9f0; margin-bottom: 30px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 30px; }
+.stat-card { background: #0f3460; padding: 20px; border-radius: 8px; border: 1px solid #4cc9f0; text-align: center; }
+.stat-value { font-size: 2.5em; font-weight: bold; color: #4cc9f0; }
+.stat-label { color: #aaa; font-size: 0.9em; margin-top: 10px; }
+.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+.chart-container { background: #0f3460; padding: 20px; border-radius: 8px; border: 1px solid #4cc9f0; height: 350px; position: relative; }
+.chart-title { color: #4cc9f0; margin-bottom: 15px; font-weight: bold; }
+canvas { max-height: 300px; }
+.loading { text-align: center; padding: 40px; color: #4cc9f0; font-size: 1.2em; }
+.error { background: #ff6464; padding: 15px; border-radius: 6px; color: #fff; margin: 10px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📊 Analyse Entraînement Damek</h1>
+  
+  <div id="stats" class="stats-grid"></div>
+  
+  <div class="charts-grid">
+    <div class="chart-container">
+      <div class="chart-title">Victoires</div>
+      <canvas id="chart1"></canvas>
+    </div>
+    <div class="chart-container">
+      <div class="chart-title">États appris</div>
+      <canvas id="chart2"></canvas>
+    </div>
+    <div class="chart-container">
+      <div class="chart-title">Epsilon (exploration)</div>
+      <canvas id="chart3"></canvas>
+    </div>
+    <div class="chart-container">
+      <div class="chart-title">Répartition Victoires/Défaites</div>
+      <canvas id="chart4"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+let allCharts = {};
+
+async function loadData() {
+  try {
+    const res1 = await fetch('/api/train/status');
+    const status = await res1.json();
+    
+    const res2 = await fetch('/api/train/history');
+    const history = await res2.json();
+    
+    const res3 = await fetch('/api/stats');
+    const stats = await res3.json();
+    
+    updateStats(status, stats);
+    updateCharts(history);
+  } catch (err) {
+    console.error('Error loading data:', err);
+    document.getElementById('stats').innerHTML = '<div class="error">Erreur: ' + err.message + '</div>';
+  }
+}
+
+function updateStats(status, stats) {
+  const html = 
+    '<div class="stat-card"><div class="stat-value">' + status.winRate + '%</div><div class="stat-label">Victoires</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + status.totalHistoryLength + '</div><div class="stat-label">Parties</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + stats.ai1_states.toLocaleString() + '</div><div class="stat-label">États</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + stats.epsilon + '</div><div class="stat-label">Epsilon</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + stats.replays + '</div><div class="stat-label">Replays</div></div>';
+  document.getElementById('stats').innerHTML = html;
+}
+
+function updateCharts(history) {
+  if (!history || history.length === 0) {
+    return;
+  }
+  
+  const episodes = history.map(h => h.episode);
+  const victories = [];
+  const states = history.map(h => h.ai_states);
+  const epsilon = history.map(h => parseFloat(h.epsilon));
+  
+  let winCount = 0;
+  history.forEach(h => {
+    if (h.winner === 0) winCount++;
+    victories.push((winCount / (victories.length + 1) * 100).toFixed(1));
+  });
+  
+  const totalWins = history.filter(h => h.winner === 0).length;
+  const totalLosses = history.length - totalWins;
+  
+  createChart('chart1', 'line', episodes, victories, '#4cc9f0', 'Victoires');
+  createChart('chart2', 'line', episodes, states, '#f72585', 'États');
+  createChart('chart3', 'line', episodes, epsilon, '#77dd77', 'Epsilon');
+  createChart('chart4', 'doughnut', ['Victoires', 'Défaites'], [totalWins, totalLosses], ['#4cc9f0', '#f72585'], 'Répartition');
+}
+
+function createChart(id, type, labels, data, color, title) {
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  
+  if (allCharts[id]) {
+    allCharts[id].destroy();
+  }
+  
+  const ctx = canvas.getContext('2d');
+  
+  if (type === 'doughnut') {
+    allCharts[id] = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: data,
+          backgroundColor: color,
+          borderColor: color,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: { color: '#fff' }
+          }
+        }
+      }
+    });
+  } else {
+    allCharts[id] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: title,
+          data: data,
+          borderColor: color,
+          backgroundColor: color + '33',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 2,
+          pointBackgroundColor: color
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: { color: '#fff' }
+          }
+        },
+        scales: {
+          y: {
+            ticks: { color: '#fff' },
+            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+          },
+          x: {
+            ticks: { color: '#fff' },
+            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+          }
+        }
+      }
+    });
+  }
+}
+
+loadData();
+setInterval(loadData, 5000);
+</script>
+</body>
+</html>`);
 });
 
 app.get('/', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🤖 IA Dämek</title><style>body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.c{max-width:600px;margin:0 auto;background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0}h1{color:#4cc9f0}.b{background:#1a3a3a;padding:10px;border-radius:4px;margin:10px 0;border-left:3px solid #77dd77}btn{background:#4cc9f0;border:none;color:#000;padding:10px 20px;border-radius:4px;cursor:pointer;font-weight:bold;margin:10px 5px 10px 0}btn:hover{background:#f72585;color:#fff}inp{background:#1a1a2e;border:1px solid #4cc9f0;color:#fff;padding:8px;border-radius:4px;width:100%;box-sizing:border-box;margin:10px 0}button{background:#4cc9f0;border:none;color:#000;padding:10px 20px;border-radius:4px;cursor:pointer;font-weight:bold;margin:10px 5px 10px 0}button:hover{background:#f72585}input{background:#1a1a2e;border:1px solid #4cc9f0;color:#fff;padding:8px;border-radius:4px;width:100%;box-sizing:border-box;margin:10px 0}.stats{background:#1a1a2e;border:1px solid #4cc9f0;padding:15px;border-radius:4px;margin:15px 0}.bar{background:#1a1a2e;height:20px;border-radius:10px;overflow:hidden;margin:10px 0}.fill{background:#4cc9f0;height:100%;width:0%;transition:width 0.3s}a{color:#4cc9f0}</style></head><body><div class="c"><h1>🤖 IA Dämek</h1><div class="b">⭐ Gamma:0.99 | Alpha:0.25 | Replay:✅<br/>📊 Total: <strong id="total">-</strong></div><input type="number" id="ep" value="500" min="100" max="1000"><button onclick="go()">🚀 Entraîner</button><button onclick="ref()">🔄 Refresh</button><a href="/analyse"><button>📊 Analyse</button></a><div class="stats"><div>Partie: <span id="e">-</span>/<span id="te">-</span></div><div>Victoires: <span id="w">-</span>%</div><div>États: <span id="st">-</span></div><div class="bar"><div class="fill" id="pb"><\/div><\/div><\/div><\/div><script>async function go(){const n=parseInt(document.getElementById('ep').value);try{await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episodes:n})});ref()}catch(e){alert('Err:'+e)}}async function ref(){try{const r1=await fetch('/api/train/status');const s1=await r1.json();const r2=await fetch('/api/stats');const s2=await r2.json();document.getElementById('e').textContent=s1.episode;document.getElementById('te').textContent=s1.totalEpisodes;document.getElementById('total').textContent=s1.totalHistoryLength;document.getElementById('w').textContent=s1.winRate;document.getElementById('st').textContent=s1.states.toLocaleString();const p=s1.totalEpisodes?(s1.episode-s1.totalEpisodesSoFar)/(s1.totalEpisodes-s1.totalEpisodesSoFar+1)*100:0;document.getElementById('pb').style.width=p+'%';if(s1.running)setTimeout(ref,2000)}catch(e){}}ref();setInterval(ref,5000)<\/script><\/body><\/html>`);
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IA Damek</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial; background: #1a1a2e; color: #fff; padding: 20px; }
+.container { max-width: 600px; margin: 0 auto; background: #0f3460; padding: 20px; border-radius: 8px; border: 1px solid #4cc9f0; }
+h1 { color: #4cc9f0; margin-bottom: 20px; }
+.info { background: #1a3a3a; padding: 15px; border-radius: 4px; margin: 15px 0; border-left: 3px solid #77dd77; color: #aaa; font-size: 0.9em; }
+input { width: 100%; padding: 10px; margin: 10px 0; background: #1a1a2e; border: 1px solid #4cc9f0; color: #fff; border-radius: 4px; font-size: 1em; }
+.buttons { display: flex; gap: 10px; margin: 15px 0; }
+button { flex: 1; padding: 12px; background: #4cc9f0; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1em; }
+button:hover { background: #f72585; color: #fff; }
+a { text-decoration: none; }
+a button { background: #4cc9f0; }
+.stats { background: #1a1a2e; border: 1px solid #4cc9f0; padding: 15px; border-radius: 4px; margin: 20px 0; }
+.stat-row { display: flex; justify-content: space-between; margin: 10px 0; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.stat-label { color: #aaa; }
+.stat-value { color: #4cc9f0; font-weight: bold; }
+.progress-bar { width: 100%; height: 20px; background: #1a1a2e; border-radius: 10px; overflow: hidden; margin: 10px 0; }
+.progress-fill { height: 100%; background: #4cc9f0; width: 0%; transition: width 0.3s; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🤖 IA Damek</h1>
+  
+  <div class="info">
+    ⭐ Gamma: 0.99 | Alpha: 0.25 | Replay: ✅<br>
+    📊 Total parties: <strong id="total">-</strong>
+  </div>
+  
+  <input type="number" id="episodes" value="500" min="100" max="1000" placeholder="Nombre de parties">
+  
+  <div class="buttons">
+    <button onclick="startTraining()">🚀 Entraîner</button>
+    <button onclick="refreshStatus()">🔄 Refresh</button>
+    <a href="/analyse"><button>📊 Analyse</button></a>
+  </div>
+  
+  <div class="stats">
+    <div class="stat-row"><span class="stat-label">Partie (session):</span><span class="stat-value"><span id="ep">-</span> / <span id="total-ep">-</span></span></div>
+    <div class="stat-row"><span class="stat-label">Victoires:</span><span class="stat-value"><span id="wr">-</span>%</span></div>
+    <div class="stat-row"><span class="stat-label">États:</span><span class="stat-value"><span id="states">-</span></span></div>
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+  </div>
+</div>
+
+<script>
+async function startTraining() {
+  const episodes = parseInt(document.getElementById('episodes').value);
+  try {
+    const res = await fetch('/api/train/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ episodes: episodes })
+    });
+    const data = await res.json();
+    alert('Entraînement lancé!\\nDémarrage: partie ' + data.startFrom);
+    refreshStatus();
+  } catch (err) {
+    alert('Erreur: ' + err.message);
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const res1 = await fetch('/api/train/status');
+    const status = await res1.json();
+    
+    const res2 = await fetch('/api/stats');
+    const stats = await res2.json();
+    
+    document.getElementById('ep').textContent = status.episode;
+    document.getElementById('total-ep').textContent = status.totalEpisodes;
+    document.getElementById('total').textContent = status.totalHistoryLength;
+    document.getElementById('wr').textContent = status.winRate;
+    document.getElementById('states').textContent = status.states.toLocaleString();
+    
+    const progress = status.totalEpisodes > 0 
+      ? ((status.episode - status.totalEpisodesSoFar) / (status.totalEpisodes - status.totalEpisodesSoFar + 1) * 100)
+      : 0;
+    document.getElementById('progress').style.width = progress + '%';
+    
+    if (status.running) {
+      setTimeout(refreshStatus, 2000);
+    }
+  } catch (err) {
+    console.error('Error:', err);
+  }
+}
+
+refreshStatus();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>`);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
