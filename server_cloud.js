@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR CLOUD - IA DÄMEK TRAINING
-// Déploie sur Render.com gratuitement
-// Le serveur entraîne l'IA 24/7 dans le cloud
+// 🤖 SERVEUR CLOUD - IA DÄMEK TRAINING (OPTIMISÉ)
+// Version STABLE avec gestion mémoire améliorée
 
 const express = require('express');
 const fs = require('fs');
@@ -13,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 // ========== MIDDLEWARE ==========
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
 // ========== CONFIGURATION ==========
@@ -33,7 +32,9 @@ let trainingStatus = {
   history: []
 };
 
-// ========== LOGIQUE JEU ==========
+let trainingInProgress = false;
+
+// ========== LOGIQUE JEU (OPTIMISÉE) ==========
 const MOVES = {
   PION: (r, c, p, b) => {
     const m = [];
@@ -145,7 +146,7 @@ function executeMove(board, from, to) {
   return { board: newBoard, captured };
 }
 
-// ========== IA ==========
+// ========== IA (OPTIMISÉE) ==========
 class DamekAI {
   constructor(player = 0) {
     this.player = player;
@@ -207,58 +208,88 @@ class DamekAI {
   }
 
   fromJSON(json) {
-    this.qTable = JSON.parse(json);
-  }
-}
-
-// ========== ENTRAÎNEMENT ==========
-async function trainGame(ai1, ai2) {
-  let board = createBoard();
-  let turn = 0;
-  let roundNum = 0;
-  let wins = [0, 0];
-
-  while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) {
-    roundNum++;
-    turn = 0;
-
-    while (turn < 100) {
-      const dice = TYPES[Math.floor(Math.random() * 6)];
-      const ai = turn === 0 ? ai1 : ai2;
-      const moves = getAllMoves(turn, dice, board);
-
-      if (!moves.length) break;
-
-      const stateBefore = ai.getBoardHash(board);
-      const move = ai.chooseAction(board, moves);
-      if (!move) break;
-
-      const result = executeMove(board, move.from, move.to);
-      board = result.board;
-
-      let reward = 1;
-      if (result.captured) {
-        if (result.captured.spy) {
-          reward = 2000;
-          wins[turn]++;
-          ai.learn(stateBefore, move, reward, ai.getBoardHash(board));
-          break;
-        } else {
-          reward = 100;
-        }
-      }
-
-      const stateAfter = ai.getBoardHash(board);
-      ai.learn(stateBefore, move, reward, stateAfter);
-
-      turn = 1 - turn;
+    try {
+      this.qTable = JSON.parse(json);
+    } catch (e) {
+      this.qTable = {};
     }
   }
 
-  ai1.decayEpsilon();
-  ai2.decayEpsilon();
+  // OPTIMISATION: Nettoyer les petites valeurs
+  cleanup() {
+    const threshold = 0.01;
+    const keys = Object.keys(this.qTable);
+    for (let key of keys) {
+      if (Math.abs(this.qTable[key]) < threshold) {
+        delete this.qTable[key];
+      }
+    }
+  }
+}
 
-  return { winner: wins[0] >= wins[1] ? 0 : 1, wins };
+// ========== ENTRAÎNEMENT (AVEC TIMEOUT) ==========
+function playGame(ai1, ai2, timeout = 5000) {
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => {
+      resolve({ winner: 0, wins: [0, 0] });
+    }, timeout);
+
+    try {
+      let board = createBoard();
+      let turn = 0;
+      let roundNum = 0;
+      let wins = [0, 0];
+
+      while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) {
+        roundNum++;
+        turn = 0;
+
+        while (turn < 100) {
+          const dice = TYPES[Math.floor(Math.random() * 6)];
+          const ai = turn === 0 ? ai1 : ai2;
+          const moves = getAllMoves(turn, dice, board);
+
+          if (!moves.length) break;
+
+          const stateBefore = ai.getBoardHash(board);
+          const move = ai.chooseAction(board, moves);
+          if (!move) break;
+
+          const result = executeMove(board, move.from, move.to);
+          board = result.board;
+
+          let reward = 1;
+          if (result.captured) {
+            if (result.captured.spy) {
+              reward = 2000;
+              wins[turn]++;
+              ai.learn(stateBefore, move, reward, ai.getBoardHash(board));
+              clearTimeout(timeoutId);
+              resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins });
+              return;
+            } else {
+              reward = 100;
+            }
+          }
+
+          const stateAfter = ai.getBoardHash(board);
+          ai.learn(stateBefore, move, reward, stateAfter);
+
+          turn = 1 - turn;
+        }
+      }
+
+      ai1.decayEpsilon();
+      ai2.decayEpsilon();
+
+      clearTimeout(timeoutId);
+      resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins });
+    } catch (e) {
+      console.error('Game error:', e);
+      clearTimeout(timeoutId);
+      resolve({ winner: 0, wins: [0, 0] });
+    }
+  });
 }
 
 let ai1 = new DamekAI(0);
@@ -273,19 +304,20 @@ try {
     ai2.fromJSON(fs.readFileSync('ai2.json', 'utf-8'));
   }
 } catch (e) {
-  console.log('⚠️ Modèles non trouvés, démarrage neuf');
+  console.log('⚠️ Modèles non trouvés');
 }
 
 // ========== API ROUTES ==========
 
 // Démarrer l'entraînement
-app.post('/api/train/start', (req, res) => {
-  const { episodes = 5000 } = req.body;
+app.post('/api/train/start', async (req, res) => {
+  const { episodes = 1000 } = req.body;
   
-  if (trainingStatus.running) {
+  if (trainingInProgress) {
     return res.json({ error: 'Entraînement déjà en cours' });
   }
 
+  trainingInProgress = true;
   trainingStatus = {
     running: true,
     episode: 0,
@@ -297,57 +329,82 @@ app.post('/api/train/start', (req, res) => {
     history: []
   };
 
+  res.json({ status: 'Entraînement lancé', episodes });
+
   // Lancer l'entraînement en arrière-plan
   (async () => {
-    for (let ep = 1; ep <= episodes; ep++) {
-      const result = await trainGame(ai1, ai2);
-      
-      trainingStatus.episode = ep;
-      trainingStatus.states = Object.keys(ai1.qTable).length;
-      trainingStatus.epsilon = ai1.epsilon;
-      trainingStatus.history.push({
-        episode: ep,
-        winner: result.winner,
-        ai_score: result.wins[0],
-        opp_score: result.wins[1],
-        epsilon: ai1.epsilon.toFixed(4),
-        ai_states: trainingStatus.states
-      });
+    try {
+      for (let ep = 1; ep <= episodes; ep++) {
+        // Timeout de sécurité
+        const result = await playGame(ai1, ai2, 5000);
+        
+        trainingStatus.episode = ep;
+        trainingStatus.states = Object.keys(ai1.qTable).length;
+        trainingStatus.epsilon = ai1.epsilon;
+        trainingStatus.history.push({
+          episode: ep,
+          winner: result.winner,
+          ai_score: result.wins[0],
+          opp_score: result.wins[1],
+          epsilon: ai1.epsilon.toFixed(4),
+          ai_states: trainingStatus.states
+        });
 
-      // Calculer win rate
-      const wins = trainingStatus.history.filter(h => h.winner === 0).length;
-      trainingStatus.winRate = (wins / ep * 100).toFixed(1);
+        const wins = trainingStatus.history.filter(h => h.winner === 0).length;
+        trainingStatus.winRate = (wins / ep * 100).toFixed(1);
 
-      // Sauvegarder tous les 100 épisodes
-      if (ep % 100 === 0) {
+        // Sauvegarder tous les 50 épisodes (pas trop souvent)
+        if (ep % Math.max(50, Math.floor(episodes / 10)) === 0) {
+          try {
+            fs.writeFileSync('ai1.json', ai1.toJSON());
+            fs.writeFileSync('ai2.json', ai2.toJSON());
+            fs.writeFileSync('history.json', JSON.stringify(trainingStatus.history, null, 2));
+            console.log(`✅ Checkpoint: ${ep}/${episodes}`);
+          } catch (e) {
+            console.error('Save error:', e);
+          }
+        }
+
+        // Nettoyer la mémoire tous les 100 épisodes
+        if (ep % 100 === 0) {
+          ai1.cleanup();
+          ai2.cleanup();
+        }
+
+        // Petit délai pour ne pas bloquer l'event loop
+        await new Promise(resolve => setImmediate(resolve));
+      }
+
+      // Entraînement terminé
+      try {
         fs.writeFileSync('ai1.json', ai1.toJSON());
         fs.writeFileSync('ai2.json', ai2.toJSON());
         fs.writeFileSync('history.json', JSON.stringify(trainingStatus.history, null, 2));
-        console.log(`✅ Checkpoint: ${ep}/${episodes}`);
+      } catch (e) {
+        console.error('Final save error:', e);
       }
+      
+      trainingStatus.running = false;
+      console.log('✅ Entraînement terminé!');
+    } catch (e) {
+      console.error('Training error:', e);
+      trainingStatus.running = false;
+    } finally {
+      trainingInProgress = false;
     }
-
-    // Entraînement terminé
-    fs.writeFileSync('ai1.json', ai1.toJSON());
-    fs.writeFileSync('ai2.json', ai2.toJSON());
-    fs.writeFileSync('history.json', JSON.stringify(trainingStatus.history, null, 2));
-    
-    trainingStatus.running = false;
-    console.log('✅ Entraînement terminé!');
   })();
-
-  res.json({ status: 'Entraînement démarré', episodes });
 });
 
 // Obtenir le statut
 app.get('/api/train/status', (req, res) => {
   const elapsed = trainingStatus.startTime ? (Date.now() - trainingStatus.startTime) / 1000 : 0;
-  const estimated = elapsed / (trainingStatus.episode / trainingStatus.totalEpisodes) - elapsed;
+  const estimated = trainingStatus.episode > 0 ? 
+    (elapsed / (trainingStatus.episode / trainingStatus.totalEpisodes)) - elapsed : 0;
 
   res.json({
     ...trainingStatus,
     elapsed: Math.floor(elapsed),
-    eta: Math.floor(estimated)
+    eta: Math.floor(Math.max(0, estimated))
   });
 });
 
@@ -358,30 +415,17 @@ app.get('/api/train/history', (req, res) => {
 
 // Télécharger les modèles
 app.get('/api/models/download', (req, res) => {
-  const ai1Data = JSON.parse(ai1.toJSON());
-  const ai2Data = JSON.parse(ai2.toJSON());
-  
-  res.json({
-    ai1: ai1Data,
-    ai2: ai2Data,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Upload des modèles
-app.post('/api/models/upload', (req, res) => {
   try {
-    const { ai1: ai1Data, ai2: ai2Data } = req.body;
+    const ai1Data = JSON.parse(ai1.toJSON());
+    const ai2Data = JSON.parse(ai2.toJSON());
     
-    if (ai1Data) ai1.fromJSON(JSON.stringify(ai1Data));
-    if (ai2Data) ai2.fromJSON(JSON.stringify(ai2Data));
-    
-    fs.writeFileSync('ai1.json', JSON.stringify(ai1Data));
-    fs.writeFileSync('ai2.json', JSON.stringify(ai2Data));
-    
-    res.json({ status: 'Modèles uploadés avec succès' });
+    res.json({
+      ai1: ai1Data,
+      ai2: ai2Data,
+      timestamp: new Date().toISOString()
+    });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -391,7 +435,9 @@ app.get('/api/stats', (req, res) => {
     ai1_states: Object.keys(ai1.qTable).length,
     ai2_states: Object.keys(ai2.qTable).length,
     total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length,
-    epsilon: ai1.epsilon.toFixed(6)
+    epsilon: ai1.epsilon.toFixed(6),
+    training: trainingStatus.running,
+    memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB'
   });
 });
 
@@ -415,6 +461,7 @@ app.get('/', (req, res) => {
         input { background: rgba(255,255,255,0.1); border: 1px solid #4cc9f0; color: white; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box; }
         .progress { background: rgba(255,255,255,0.1); height: 20px; border-radius: 10px; overflow: hidden; margin: 10px 0; }
         .progress-bar { background: linear-gradient(90deg, #4cc9f0, #f72585); height: 100%; width: 0%; transition: width 0.3s; }
+        .warning { background: rgba(255,165,0,0.2); border: 1px solid #ffa500; color: #ffa500; padding: 10px; border-radius: 4px; margin: 10px 0; }
     </style>
 </head>
 <body>
@@ -422,9 +469,13 @@ app.get('/', (req, res) => {
         <h1>🤖 IA Dämek - Cloud Training</h1>
         <p>L'entraînement se fait dans le cloud ☁️ Ton PC reste libre!</p>
         
+        <div class="warning">
+            ⚠️ Max 1000 parties par entraînement (limite serveur gratuit)
+        </div>
+        
         <div style="margin: 20px 0;">
             <label>Nombre de parties à entraîner:</label>
-            <input type="number" id="episodes" value="5000" min="100">
+            <input type="number" id="episodes" value="1000" min="100" max="1000">
         </div>
         
         <button onclick="startTraining()">🚀 Démarrer l'entraînement</button>
@@ -437,18 +488,18 @@ app.get('/', (req, res) => {
             <div class="stat">🧠 États: <span id="states">-</span></div>
             <div class="stat">🔍 Epsilon: <span id="epsilon">-</span></div>
             <div class="stat">⏱️ Temps: <span id="elapsed">-</span>s | ETA: <span id="eta">-</span>s</div>
+            <div class="stat">💾 Mémoire: <span id="memory">-</span></div>
             <div class="progress"><div class="progress-bar" id="bar"></div></div>
             <div class="stat">Statut: <span id="status">Prêt</span></div>
         </div>
         
-        <h3>🎯 Instructions</h3>
-        <ol>
-            <li>Rentre le nombre de parties (5000 = 4h)</li>
-            <li>Clique "Démarrer l'entraînement"</li>
-            <li>L'IA s'entraîne dans le cloud 24/7</li>
-            <li>Reviens quand tu veux pour voir la progression</li>
-            <li>Les modèles se sauvegardent automatiquement</li>
-        </ol>
+        <h3>🎯 Important</h3>
+        <ul>
+            <li>Max 1000 parties par entraînement (limitation gratuite)</li>
+            <li>Si ça crash, relance avec moins de parties (500)</li>
+            <li>Les données se sauvegardent tous les 50-100 épisodes</li>
+            <li>Laisse 1-2 min entre les entraînements</li>
+        </ul>
         
         <h3>📥 Télécharger les modèles</h3>
         <button onclick="downloadModels()">💾 Télécharger damek_ai.json</button>
@@ -456,16 +507,24 @@ app.get('/', (req, res) => {
     
     <script>
         async function startTraining() {
-            const episodes = document.getElementById('episodes').value;
+            const episodes = parseInt(document.getElementById('episodes').value);
+            if (episodes > 1000) {
+                alert('⚠️ Max 1000 parties! (limite serveur gratuit)');
+                return;
+            }
             try {
                 const res = await fetch('/api/train/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ episodes: parseInt(episodes) })
+                    body: JSON.stringify({ episodes })
                 });
                 const data = await res.json();
-                alert('✅ Entraînement lancé! ' + data.status);
-                refreshStatus();
+                if (data.error) {
+                    alert('❌ ' + data.error);
+                } else {
+                    alert('✅ Entraînement lancé! ' + data.status);
+                    refreshStatus();
+                }
             } catch (e) {
                 alert('❌ Erreur: ' + e.message);
             }
@@ -477,6 +536,7 @@ app.get('/', (req, res) => {
                 const data = await res.json();
                 document.getElementById('states').textContent = data.ai1_states.toLocaleString();
                 document.getElementById('epsilon').textContent = data.epsilon;
+                document.getElementById('memory').textContent = data.memory;
             } catch (e) {
                 console.error(e);
             }
@@ -530,21 +590,36 @@ app.get('/', (req, res) => {
   `);
 });
 
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // ========== DÉMARRAGE ==========
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════╗
-║ 🤖 IA DÄMEK CLOUD TRAINING SERVER         ║
+║ 🤖 IA DÄMEK CLOUD TRAINING SERVER (STABLE)║
 ╠════════════════════════════════════════════╣
 ║                                            ║
 ║ ✅ Serveur lancé sur port ${PORT}          ║
 ║                                            ║
 ║ 🌐 URL: https://damek-ai-training.com     ║
-║    (ou local: http://localhost:${PORT})     ║
+║    (ou: http://localhost:${PORT})           ║
 ║                                            ║
-║ L'entraînement se fait dans le cloud ☁️    ║
-║ Ton PC reste libre pour travailler!       ║
+║ ⚠️  Max 1000 parties par entraînement      ║
+║ 💾 Mémoire optimisée                       ║
+║ 🔄 Sauvegarde automatique                  ║
 ║                                            ║
 ╚════════════════════════════════════════════╝
   `);
+});
+
+// Gestion des erreurs serveur
+server.on('error', (err) => {
+  console.error('Server error:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
