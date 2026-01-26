@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR CLOUD - IA DÄMEK FINAL
-// Avec page analyse VRAIMENT STABLE
+// 🤖 SERVEUR LÉGER OPTIMISÉ POUR RENDER
+// Replay Buffer réduit, cleanup agressif, historique optimisé
 
 const express = require('express');
 const fs = require('fs');
@@ -9,7 +9,7 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-console.log(`\n✅ Serveur OPTIMISÉ FINAL sur port ${PORT}\n`);
+console.log(`\n✅ Serveur LÉGER (optimisé Render) sur port ${PORT}\n`);
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -18,6 +18,11 @@ const TYPES = ['PION', 'CAVALIER', 'FOU', 'TOUR', 'ROI', 'DAME'];
 const LEARNING_RATE = 0.25;
 const EPSILON_DECAY = 0.995;
 const GAMMA = 0.99;
+
+// 🆕 OPTIMISATIONS MÉMOIRE
+const MAX_BUFFER = 2000;      // ← Réduit de 10000!
+const CLEANUP_INTERVAL = 10;  // ← Augmenté de 150!
+const MAX_HISTORY = 200;      // ← Limite historique en mémoire!
 
 let trainingStatus = { 
   running: false, 
@@ -38,9 +43,10 @@ function loadHistoryFromFile() {
       const data = fs.readFileSync('history.json', 'utf-8');
       const history = JSON.parse(data);
       if (Array.isArray(history) && history.length > 0) {
-        trainingStatus.history = history;
+        // 🆕 Ne charger en mémoire que les dernières 200 entrées
+        trainingStatus.history = history.slice(-MAX_HISTORY);
         trainingStatus.totalEpisodesSoFar = history.length;
-        console.log(`📂 Historique chargé: ${history.length} parties`);
+        console.log(`📂 Historique: ${history.length} total (${trainingStatus.history.length} en mémoire)`);
         return history.length;
       }
     }
@@ -76,7 +82,7 @@ class DamekAI {
     this.gamma = GAMMA;
     this.epsilon = 1.0;
     this.experiences = [];
-    this.maxExperiences = 10000;
+    this.maxExperiences = MAX_BUFFER;  // 🆕 Réduit!
   }
 
   getBoardHash(board) { 
@@ -126,7 +132,7 @@ class DamekAI {
     }
   }
 
-  replayLearning(batchSize = 50) {
+  replayLearning(batchSize = 30) {  // 🆕 Réduit de 50!
     if (this.experiences.length < batchSize) return 0;
     let totalGain = 0;
     for (let i = 0; i < batchSize; i++) {
@@ -151,7 +157,23 @@ class DamekAI {
   decayEpsilon() { this.epsilon *= EPSILON_DECAY; }
   toJSON() { return JSON.stringify(this.qTable); }
   fromJSON(json) { try { this.qTable = JSON.parse(json); } catch (e) { this.qTable = {}; } }
-  cleanup() { const threshold = 0.01; const keys = Object.keys(this.qTable); for (let key of keys) { if (Math.abs(this.qTable[key]) < threshold) { delete this.qTable[key]; } } }
+  
+  // 🆕 CLEANUP AGRESSIF
+  cleanup() { 
+    const threshold = 0.05;  // 🆕 Augmenté de 0.01!
+    const keys = Object.keys(this.qTable); 
+    let removed = 0;
+    for (let key of keys) { 
+      if (Math.abs(this.qTable[key]) < threshold) { 
+        delete this.qTable[key]; 
+        removed++;
+      } 
+    }
+    if (removed > 0) {
+      console.log(`🧹 Cleanup: ${removed} entrées supprimées`);
+    }
+    return removed;
+  }
 }
 
 function playGame(ai1, ai2, timeout = 5000) {
@@ -196,336 +218,107 @@ app.post('/api/train/start', async (req, res) => {
       for (let ep = startingEpisode; ep <= trainingStatus.totalEpisodes; ep++) {
         const result = await playGame(ai1, ai2, 5000);
         trainingStatus.episode = ep; trainingStatus.states = Object.keys(ai1.qTable).length; trainingStatus.epsilon = ai1.epsilon;
-        trainingStatus.history.push({ episode: ep, winner: result.winner, ai_score: result.wins[0], opp_score: result.wins[1], epsilon: ai1.epsilon.toFixed(4), ai_states: trainingStatus.states });
-        const wins = trainingStatus.history.filter(h => h.winner === 0).length; trainingStatus.winRate = (wins / trainingStatus.history.length * 100).toFixed(1);
+        
+        const newEntry = { episode: ep, winner: result.winner, ai_score: result.wins[0], opp_score: result.wins[1], epsilon: ai1.epsilon.toFixed(4), ai_states: trainingStatus.states };
+        trainingStatus.history.push(newEntry);
+        
+        // 🆕 Limite l'historique en mémoire
+        if (trainingStatus.history.length > MAX_HISTORY) {
+          trainingStatus.history.shift();
+        }
+        
+        const wins = trainingStatus.history.filter(h => h.winner === 0).length; 
+        trainingStatus.winRate = (wins / trainingStatus.history.length * 100).toFixed(1);
+
         if ((ep - startingEpisode) % 20 === 0) {
-          const gain1 = ai1.replayLearning(50);
+          const gain1 = ai1.replayLearning(30);  // 🆕 Réduit!
           if (gain1) { trainingStatus.replayStats.replays++; trainingStatus.replayStats.avgGain = gain1; }
         }
+
         if ((ep - startingEpisode) % Math.max(50, Math.floor(episodes / 10)) === 0) {
-          try { fs.writeFileSync('ai1.json', ai1.toJSON()); fs.writeFileSync('ai2.json', ai2.toJSON()); fs.writeFileSync('history.json', JSON.stringify(trainingStatus.history, null, 2)); console.log(`✅ Checkpoint: ${ep}/${trainingStatus.totalEpisodes}`); } catch (e) { }
+          try { 
+            fs.writeFileSync('ai1.json', ai1.toJSON()); 
+            fs.writeFileSync('ai2.json', ai2.toJSON()); 
+            
+            // 🆕 Charger l'historique complet du fichier
+            let fullHistory = [];
+            try {
+              const data = fs.readFileSync('history.json', 'utf-8');
+              fullHistory = JSON.parse(data);
+            } catch (e) {}
+            
+            // Ajouter les nouvelles entrées
+            for (let h of trainingStatus.history) {
+              if (!fullHistory.find(x => x.episode === h.episode)) {
+                fullHistory.push(h);
+              }
+            }
+            
+            fs.writeFileSync('history.json', JSON.stringify(fullHistory, null, 2));
+            console.log(`✅ Checkpoint: ${ep}/${trainingStatus.totalEpisodes}`); 
+          } catch (e) { console.error('Save error:', e); }
         }
-        if ((ep - startingEpisode) % 150 === 0) { ai1.cleanup(); ai2.cleanup(); }
+
+        // 🆕 Cleanup beaucoup plus fréquent!
+        if ((ep - startingEpisode) % CLEANUP_INTERVAL === 0) { 
+          ai1.cleanup(); 
+          ai2.cleanup();
+          console.log(`💾 Mémoire: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`);
+        }
+
         await new Promise(resolve => setImmediate(resolve));
       }
-      try { fs.writeFileSync('ai1.json', ai1.toJSON()); fs.writeFileSync('ai2.json', ai2.toJSON()); fs.writeFileSync('history.json', JSON.stringify(trainingStatus.history, null, 2)); } catch (e) { }
-      trainingStatus.running = false; trainingStatus.totalEpisodesSoFar = trainingStatus.history.length;
-      console.log(`✅ Entraînement terminé! Total: ${trainingStatus.history.length} parties`);
+
+      try { 
+        fs.writeFileSync('ai1.json', ai1.toJSON()); 
+        fs.writeFileSync('ai2.json', ai2.toJSON());
+        
+        let fullHistory = [];
+        try {
+          const data = fs.readFileSync('history.json', 'utf-8');
+          fullHistory = JSON.parse(data);
+        } catch (e) {}
+        
+        for (let h of trainingStatus.history) {
+          if (!fullHistory.find(x => x.episode === h.episode)) {
+            fullHistory.push(h);
+          }
+        }
+        
+        fs.writeFileSync('history.json', JSON.stringify(fullHistory, null, 2));
+      } catch (e) { }
+      
+      trainingStatus.running = false; 
+      trainingStatus.totalEpisodesSoFar = trainingStatus.totalEpisodesSoFar + (trainingStatus.totalEpisodes - startingEpisode + 1);
+      console.log(`✅ Entraînement terminé!`);
     } catch (e) { console.error('Training error:', e); trainingStatus.running = false; } finally { trainingInProgress = false; }
   })();
 });
 
 app.get('/api/train/status', (req, res) => {
   const elapsed = trainingStatus.startTime ? (Date.now() - trainingStatus.startTime) / 1000 : 0;
-  res.json({ ...trainingStatus, elapsed: Math.floor(elapsed), totalHistoryLength: trainingStatus.history.length });
+  res.json({ ...trainingStatus, elapsed: Math.floor(elapsed), totalHistoryLength: trainingStatus.totalEpisodesSoFar });
 });
 
 app.get('/api/train/history', (req, res) => res.json(trainingStatus.history));
 
-app.get('/api/models/download', (req, res) => {
-  try { const ai1Data = JSON.parse(ai1.toJSON()); const ai2Data = JSON.parse(ai2.toJSON());
-    res.json({ ai1: ai1Data, ai2: ai2Data, timestamp: new Date().toISOString() }); } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.get('/api/stats', (req, res) => {
-  res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.history.length, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY } });
+  res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.totalEpisodesSoFar, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY, maxBuffer: MAX_BUFFER, cleanupInterval: CLEANUP_INTERVAL } });
 });
 
-// PAGE ANALYSE - HTML SIMPLE ET FONCTIONNEL
+// PAGE ANALYSE
 app.get('/analyse', (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Analyse Damek</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: Arial, sans-serif; background: #1a1a2e; color: #fff; padding: 20px; }
-.container { max-width: 1200px; margin: 0 auto; }
-h1 { text-align: center; color: #4cc9f0; margin-bottom: 30px; }
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 30px; }
-.stat-card { background: #0f3460; padding: 20px; border-radius: 8px; border: 1px solid #4cc9f0; text-align: center; }
-.stat-value { font-size: 2.5em; font-weight: bold; color: #4cc9f0; }
-.stat-label { color: #aaa; font-size: 0.9em; margin-top: 10px; }
-.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
-.chart-container { background: #0f3460; padding: 20px; border-radius: 8px; border: 1px solid #4cc9f0; height: 350px; position: relative; }
-.chart-title { color: #4cc9f0; margin-bottom: 15px; font-weight: bold; }
-canvas { max-height: 300px; }
-.loading { text-align: center; padding: 40px; color: #4cc9f0; font-size: 1.2em; }
-.error { background: #ff6464; padding: 15px; border-radius: 6px; color: #fff; margin: 10px 0; }
-</style>
-</head>
-<body>
-<div class="container">
-  <h1>📊 Analyse Entraînement Damek</h1>
-  
-  <div id="stats" class="stats-grid"></div>
-  
-  <div class="charts-grid">
-    <div class="chart-container">
-      <div class="chart-title">Victoires</div>
-      <canvas id="chart1"></canvas>
-    </div>
-    <div class="chart-container">
-      <div class="chart-title">États appris</div>
-      <canvas id="chart2"></canvas>
-    </div>
-    <div class="chart-container">
-      <div class="chart-title">Epsilon (exploration)</div>
-      <canvas id="chart3"></canvas>
-    </div>
-    <div class="chart-container">
-      <div class="chart-title">Répartition Victoires/Défaites</div>
-      <canvas id="chart4"></canvas>
-    </div>
-  </div>
-</div>
-
-<script>
-let allCharts = {};
-
-async function loadData() {
-  try {
-    const res1 = await fetch('/api/train/status');
-    const status = await res1.json();
-    
-    const res2 = await fetch('/api/train/history');
-    const history = await res2.json();
-    
-    const res3 = await fetch('/api/stats');
-    const stats = await res3.json();
-    
-    updateStats(status, stats);
-    updateCharts(history);
-  } catch (err) {
-    console.error('Error loading data:', err);
-    document.getElementById('stats').innerHTML = '<div class="error">Erreur: ' + err.message + '</div>';
-  }
-}
-
-function updateStats(status, stats) {
-  const html = 
-    '<div class="stat-card"><div class="stat-value">' + status.winRate + '%</div><div class="stat-label">Victoires</div></div>' +
-    '<div class="stat-card"><div class="stat-value">' + status.totalHistoryLength + '</div><div class="stat-label">Parties</div></div>' +
-    '<div class="stat-card"><div class="stat-value">' + stats.ai1_states.toLocaleString() + '</div><div class="stat-label">États</div></div>' +
-    '<div class="stat-card"><div class="stat-value">' + stats.epsilon + '</div><div class="stat-label">Epsilon</div></div>' +
-    '<div class="stat-card"><div class="stat-value">' + stats.replays + '</div><div class="stat-label">Replays</div></div>';
-  document.getElementById('stats').innerHTML = html;
-}
-
-function updateCharts(history) {
-  if (!history || history.length === 0) {
-    return;
-  }
-  
-  const episodes = history.map(h => h.episode);
-  const victories = [];
-  const states = history.map(h => h.ai_states);
-  const epsilon = history.map(h => parseFloat(h.epsilon));
-  
-  let winCount = 0;
-  history.forEach(h => {
-    if (h.winner === 0) winCount++;
-    victories.push((winCount / (victories.length + 1) * 100).toFixed(1));
-  });
-  
-  const totalWins = history.filter(h => h.winner === 0).length;
-  const totalLosses = history.length - totalWins;
-  
-  createChart('chart1', 'line', episodes, victories, '#4cc9f0', 'Victoires');
-  createChart('chart2', 'line', episodes, states, '#f72585', 'États');
-  createChart('chart3', 'line', episodes, epsilon, '#77dd77', 'Epsilon');
-  createChart('chart4', 'doughnut', ['Victoires', 'Défaites'], [totalWins, totalLosses], ['#4cc9f0', '#f72585'], 'Répartition');
-}
-
-function createChart(id, type, labels, data, color, title) {
-  const canvas = document.getElementById(id);
-  if (!canvas) return;
-  
-  if (allCharts[id]) {
-    allCharts[id].destroy();
-  }
-  
-  const ctx = canvas.getContext('2d');
-  
-  if (type === 'doughnut') {
-    allCharts[id] = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: labels,
-        datasets: [{
-          data: data,
-          backgroundColor: color,
-          borderColor: color,
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            labels: { color: '#fff' }
-          }
-        }
-      }
-    });
-  } else {
-    allCharts[id] = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [{
-          label: title,
-          data: data,
-          borderColor: color,
-          backgroundColor: color + '33',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 2,
-          pointBackgroundColor: color
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            labels: { color: '#fff' }
-          }
-        },
-        scales: {
-          y: {
-            ticks: { color: '#fff' },
-            grid: { color: 'rgba(255, 255, 255, 0.1)' }
-          },
-          x: {
-            ticks: { color: '#fff' },
-            grid: { color: 'rgba(255, 255, 255, 0.1)' }
-          }
-        }
-      }
-    });
-  }
-}
-
-loadData();
-setInterval(loadData, 5000);
-</script>
-</body>
-</html>`);
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Analyse</title><script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:1200px;margin:0 auto}h1{text-align:center;color:#4cc9f0;margin-bottom:30px}.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin-bottom:30px}.stat-card{background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0;text-align:center}.stat-value{font-size:2.5em;font-weight:bold;color:#4cc9f0}.stat-label{color:#aaa;font-size:0.9em;margin-top:10px}.charts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:20px}.chart-container{background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0;height:350px;position:relative}.chart-title{color:#4cc9f0;margin-bottom:15px;font-weight:bold}canvas{max-height:300px}</style></head><body><div class="container"><h1>📊 Analyse Damek</h1><div id="stats" class="stats-grid"></div><div class="charts-grid"><div class="chart-container"><div class="chart-title">Victoires</div><canvas id="c1"></canvas></div><div class="chart-container"><div class="chart-title">États</div><canvas id="c2"></canvas></div><div class="chart-container"><div class="chart-title">Epsilon</div><canvas id="c3"></canvas></div><div class="chart-container"><div class="chart-title">Répartition</div><canvas id="c4"></canvas></div></div></div><script>let charts={};async function load(){try{const s=await fetch('/api/train/status'),st=await s.json(),h=await fetch('/api/train/history'),hl=await h.json(),a=await fetch('/api/stats'),ap=await a.json();document.getElementById('stats').innerHTML='<div class="stat-card"><div class="stat-value">'+st.winRate+'%</div><div class="stat-label">Victoires</div></div><div class="stat-card"><div class="stat-value">'+st.totalHistoryLength+'</div><div class="stat-label">Parties</div></div><div class="stat-card"><div class="stat-value">'+ap.ai1_states.toLocaleString()+'</div><div class="stat-label">États</div></div><div class="stat-card"><div class="stat-value">'+ap.epsilon+'</div><div class="stat-label">Epsilon</div></div>';if(!hl||hl.length<1)return;const e=hl.map(x=>x.episode),v=[],st2=[],p=[];let w=0;hl.forEach(x=>{if(x.winner===0)w++;v.push((w/hl.length*100).toFixed(1));st2.push(x.ai_states);p.push(parseFloat(x.epsilon))});const tw=hl.filter(x=>x.winner===0).length,tl=hl.length-tw;mk('c1',e,v,'#4cc9f0');mk('c2',e,st2,'#f72585');mk('c3',e,p,'#77dd77');mk('c4',[tw,tl],['#4cc9f0','#f72585'],'pie')}catch(e){console.error(e)})}function mk(i,x,y,c,t){const a=document.getElementById(i);if(!a)return;if(charts[i])charts[i].destroy();const ctx=a.getContext('2d');const ispie='c4'===i;charts[i]=new Chart(ctx,{type:isie?'doughnut':'line',data:{labels:x,datasets:[{label:t||'',data:y,borderColor:c,backgroundColor:isie?c:'rgba(0,0,0,0.1)',borderWidth:2,fill:!isie,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#fff'}}},scales:{y:{ticks:{color:'#fff'},grid:{color:'rgba(255,255,255,0.1)'}},x:{ticks:{color:'#fff'},grid:{color:'rgba(255,255,255,0.1)'}}}}});}load();setInterval(load,5000);</script></body></html>`);
 });
 
 app.get('/', (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IA Damek</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: Arial; background: #1a1a2e; color: #fff; padding: 20px; }
-.container { max-width: 600px; margin: 0 auto; background: #0f3460; padding: 20px; border-radius: 8px; border: 1px solid #4cc9f0; }
-h1 { color: #4cc9f0; margin-bottom: 20px; }
-.info { background: #1a3a3a; padding: 15px; border-radius: 4px; margin: 15px 0; border-left: 3px solid #77dd77; color: #aaa; font-size: 0.9em; }
-input { width: 100%; padding: 10px; margin: 10px 0; background: #1a1a2e; border: 1px solid #4cc9f0; color: #fff; border-radius: 4px; font-size: 1em; }
-.buttons { display: flex; gap: 10px; margin: 15px 0; }
-button { flex: 1; padding: 12px; background: #4cc9f0; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1em; }
-button:hover { background: #f72585; color: #fff; }
-a { text-decoration: none; }
-a button { background: #4cc9f0; }
-.stats { background: #1a1a2e; border: 1px solid #4cc9f0; padding: 15px; border-radius: 4px; margin: 20px 0; }
-.stat-row { display: flex; justify-content: space-between; margin: 10px 0; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.stat-label { color: #aaa; }
-.stat-value { color: #4cc9f0; font-weight: bold; }
-.progress-bar { width: 100%; height: 20px; background: #1a1a2e; border-radius: 10px; overflow: hidden; margin: 10px 0; }
-.progress-fill { height: 100%; background: #4cc9f0; width: 0%; transition: width 0.3s; }
-</style>
-</head>
-<body>
-<div class="container">
-  <h1>🤖 IA Damek</h1>
-  
-  <div class="info">
-    ⭐ Gamma: 0.99 | Alpha: 0.25 | Replay: ✅<br>
-    📊 Total parties: <strong id="total">-</strong>
-  </div>
-  
-  <input type="number" id="episodes" value="500" min="100" max="1000" placeholder="Nombre de parties">
-  
-  <div class="buttons">
-    <button onclick="startTraining()">🚀 Entraîner</button>
-    <button onclick="refreshStatus()">🔄 Refresh</button>
-    <a href="/analyse"><button>📊 Analyse</button></a>
-  </div>
-  
-  <div class="stats">
-    <div class="stat-row"><span class="stat-label">Partie (session):</span><span class="stat-value"><span id="ep">-</span> / <span id="total-ep">-</span></span></div>
-    <div class="stat-row"><span class="stat-label">Victoires:</span><span class="stat-value"><span id="wr">-</span>%</span></div>
-    <div class="stat-row"><span class="stat-label">États:</span><span class="stat-value"><span id="states">-</span></span></div>
-    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
-  </div>
-</div>
-
-<script>
-async function startTraining() {
-  const episodes = parseInt(document.getElementById('episodes').value);
-  try {
-    const res = await fetch('/api/train/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ episodes: episodes })
-    });
-    const data = await res.json();
-    alert('Entraînement lancé!\\nDémarrage: partie ' + data.startFrom);
-    refreshStatus();
-  } catch (err) {
-    alert('Erreur: ' + err.message);
-  }
-}
-
-async function refreshStatus() {
-  try {
-    const res1 = await fetch('/api/train/status');
-    const status = await res1.json();
-    
-    const res2 = await fetch('/api/stats');
-    const stats = await res2.json();
-    
-    document.getElementById('ep').textContent = status.episode;
-    document.getElementById('total-ep').textContent = status.totalEpisodes;
-    document.getElementById('total').textContent = status.totalHistoryLength;
-    document.getElementById('wr').textContent = status.winRate;
-    document.getElementById('states').textContent = status.states.toLocaleString();
-    
-    const progress = status.totalEpisodes > 0 
-      ? ((status.episode - status.totalEpisodesSoFar) / (status.totalEpisodes - status.totalEpisodesSoFar + 1) * 100)
-      : 0;
-    document.getElementById('progress').style.width = progress + '%';
-    
-    if (status.running) {
-      setTimeout(refreshStatus, 2000);
-    }
-  } catch (err) {
-    console.error('Error:', err);
-  }
-}
-
-refreshStatus();
-setInterval(refreshStatus, 5000);
-</script>
-</body>
-</html>`);
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>IA Damek</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:600px;margin:0 auto;background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0}h1{color:#4cc9f0;margin-bottom:20px}.info{background:#1a3a3a;padding:15px;border-radius:4px;margin:15px 0;border-left:3px solid #77dd77;color:#aaa;font-size:0.9em}input{width:100%;padding:10px;margin:10px 0;background:#1a1a2e;border:1px solid #4cc9f0;color:#fff;border-radius:4px}button{flex:1;padding:12px;background:#4cc9f0;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:bold}.buttons{display:flex;gap:10px;margin:15px 0}button:hover{background:#f72585}a{text-decoration:none}a button{background:#4cc9f0}.stats{background:#1a1a2e;border:1px solid #4cc9f0;padding:15px;border-radius:4px;margin:20px 0}.stat-row{display:flex;justify-content:space-between;margin:10px 0}.stat-label{color:#aaa}.stat-value{color:#4cc9f0;font-weight:bold}.progress-bar{width:100%;height:20px;background:#1a1a2e;border-radius:10px;overflow:hidden;margin:10px 0}.progress-fill{height:100%;background:#4cc9f0;width:0%;transition:width 0.3s}</style></head><body><div class="container"><h1>🤖 IA Damek</h1><div class="info">⭐ LÉGER (optimisé Render)<br>📊 Total: <strong id="tot">-</strong></div><input type="number" id="ep" value="500" min="100" max="1000"><div class="buttons"><button onclick="go()">🚀 Entraîner</button><button onclick="ref()">🔄 Refresh</button><a href="/analyse"><button>📊 Analyse</button></a></div><div class="stats"><div class="stat-row"><span class="stat-label">Partie:</span><span class="stat-value"><span id="e">-</span>/<span id="te">-</span></span></div><div class="stat-row"><span class="stat-label">Victoires:</span><span class="stat-value"><span id="w">-</span>%</span></div><div class="stat-row"><span class="stat-label">États:</span><span class="stat-value"><span id="st">-</span></span></div><div class="progress-bar"><div class="progress-fill" id="pb"></div></div></div></div><script>async function go(){const n=parseInt(document.getElementById('ep').value);try{await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episodes:n})});ref()}catch(e){}}async function ref(){try{const r1=await fetch('/api/train/status'),s1=await r1.json(),r2=await fetch('/api/stats'),s2=await r2.json();document.getElementById('e').textContent=s1.episode;document.getElementById('te').textContent=s1.totalEpisodes;document.getElementById('tot').textContent=s1.totalHistoryLength;document.getElementById('w').textContent=s1.winRate;document.getElementById('st').textContent=s1.states.toLocaleString();const p=s1.totalEpisodes?((s1.episode-s1.totalEpisodesSoFar)/(s1.totalEpisodes-s1.totalEpisodesSoFar+1)*100):0;document.getElementById('pb').style.width=p+'%';if(s1.running)setTimeout(ref,2000)}catch(e){}}ref();setInterval(ref,5000)</script></body></html>`);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n✅ Serveur OPTIMISÉ FINAL - PORT ${PORT}\n`);
+  console.log(`\n✅ Serveur LÉGER optimisé pour Render - PORT ${PORT}\n`);
 });
 
 server.on('error', (err) => console.error('Error:', err));
