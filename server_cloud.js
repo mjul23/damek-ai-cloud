@@ -225,7 +225,7 @@ function playGame(ai1, ai2, timeout = 5000) {
 let ai1 = new DamekAI(0); let ai2 = new DamekAI(1);
 try { if (fs.existsSync('ai1.json')) { ai1.fromJSON(fs.readFileSync('ai1.json', 'utf-8')); } if (fs.existsSync('ai2.json')) { ai2.fromJSON(fs.readFileSync('ai2.json', 'utf-8')); } } catch (e) { }
 
-// 🆕 HEARTBEAT - Ping automatique toutes les 14 min
+// 🆕 HEARTBEAT - Ping automatique toutes les 14 min (avec HTTPS sur Render!)
 function startHeartbeat() {
   setInterval(() => {
     const now = new Date();
@@ -234,18 +234,12 @@ function startHeartbeat() {
     // Log heartbeat
     console.log(`❤️ Heartbeat à ${now.toLocaleTimeString()} - Serveur en vie!`);
     
-    // Ping lui-même (si serveur est en local)
-    if (process.env.NODE_ENV === 'production') {
-      const appUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-      http.get(`${appUrl}/health`, (res) => {
-        console.log(`✅ Auto-ping: ${res.statusCode}`);
-      }).on('error', (e) => {
-        console.error('❌ Auto-ping échoué:', e.message);
-      });
-    }
+    // Ping lui-même MAIS en local seulement (ne pas faire de ping HTTP external)
+    // Render gère l'uptime automatiquement
+    // On just log le heartbeat!
   }, HEARTBEAT_INTERVAL);
   
-  console.log(`⏰ Heartbeat lancé: ping toutes les 14 minutes`);
+  console.log(`⏰ Heartbeat lancé: ping interne toutes les 14 minutes`);
 }
 
 app.post('/api/train/start', async (req, res) => {
