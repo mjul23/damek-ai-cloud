@@ -1,27 +1,29 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR FINAL - EPSILON BUG FIXÉ!
-// Maintenant epsilon DÉCROÎT correctement
+// 🤖 SERVEUR FINAL - AVEC HEARTBEAT (anti-veille Render)
+// Ping automatique toutes les 14 minutes
 
 const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
+const http = require('http');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-console.log(`\n✅ Serveur FINAL (Epsilon FIXÉ!) - PORT ${PORT}\n`);
+console.log(`\n✅ Serveur AVEC HEARTBEAT - PORT ${PORT}\n`);
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 const TYPES = ['PION', 'CAVALIER', 'FOU', 'TOUR', 'ROI', 'DAME'];
 const LEARNING_RATE = 0.25;
-const EPSILON_DECAY = 0.9985;  // 🆕 Légèrement plus agressif
+const EPSILON_DECAY = 0.9985;
 const GAMMA = 0.99;
 
 const MAX_BUFFER = 2000;
 const CLEANUP_INTERVAL = 10;
 const MAX_HISTORY = 200;
+const HEARTBEAT_INTERVAL = 14 * 60 * 1000; // 14 minutes en millisecondes
 
 let trainingStatus = { 
   running: false, 
@@ -34,7 +36,8 @@ let trainingStatus = {
   history: [],
   replayStats: { replays: 0, avgGain: 0 },
   totalEpisodesSoFar: 0,
-  epsilonHistory: []  // 🆕 Tracer epsilon
+  epsilonHistory: [],
+  lastHeartbeat: new Date()
 };
 
 function loadHistoryFromFile() {
@@ -169,11 +172,9 @@ class DamekAI {
     return totalGain / batchSize;
   }
 
-  // 🆕 FIXÉ: decayEpsilon APPELÉ CORRECTEMENT
   decayEpsilon() { 
     const oldEpsilon = this.epsilon;
     this.epsilon *= EPSILON_DECAY;
-    // Clamp entre 0.01 et 1.0
     if (this.epsilon < 0.01) this.epsilon = 0.01;
     if (this.epsilon > 1.0) this.epsilon = 1.0;
   }
@@ -214,10 +215,8 @@ function playGame(ai1, ai2, timeout = 5000) {
           const stateAfter = ai.getBoardHash(board); ai.learn(stateBefore, move, reward, stateAfter); turn = 1 - turn;
         }
       }
-      // 🆕 FIXÉ: APPELER decayEpsilon APRÈS CHAQUE PARTIE
       ai1.decayEpsilon(); 
       ai2.decayEpsilon();
-      
       clearTimeout(timeoutId); resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins });
     } catch (e) { console.error('Game error:', e); clearTimeout(timeoutId); resolve({ winner: 0, wins: [0, 0] }); }
   });
@@ -226,12 +225,35 @@ function playGame(ai1, ai2, timeout = 5000) {
 let ai1 = new DamekAI(0); let ai2 = new DamekAI(1);
 try { if (fs.existsSync('ai1.json')) { ai1.fromJSON(fs.readFileSync('ai1.json', 'utf-8')); } if (fs.existsSync('ai2.json')) { ai2.fromJSON(fs.readFileSync('ai2.json', 'utf-8')); } } catch (e) { }
 
+// 🆕 HEARTBEAT - Ping automatique toutes les 14 min
+function startHeartbeat() {
+  setInterval(() => {
+    const now = new Date();
+    trainingStatus.lastHeartbeat = now;
+    
+    // Log heartbeat
+    console.log(`❤️ Heartbeat à ${now.toLocaleTimeString()} - Serveur en vie!`);
+    
+    // Ping lui-même (si serveur est en local)
+    if (process.env.NODE_ENV === 'production') {
+      const appUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      http.get(`${appUrl}/health`, (res) => {
+        console.log(`✅ Auto-ping: ${res.statusCode}`);
+      }).on('error', (e) => {
+        console.error('❌ Auto-ping échoué:', e.message);
+      });
+    }
+  }, HEARTBEAT_INTERVAL);
+  
+  console.log(`⏰ Heartbeat lancé: ping toutes les 14 minutes`);
+}
+
 app.post('/api/train/start', async (req, res) => {
   const { episodes = 1000 } = req.body;
   if (trainingInProgress) { return res.json({ error: 'Entraînement déjà en cours' }); }
   trainingInProgress = true;
   const startingEpisode = trainingStatus.totalEpisodesSoFar + 1;
-  trainingStatus = { running: true, episode: startingEpisode, totalEpisodes: startingEpisode + episodes - 1, winRate: 0, states: Object.keys(ai1.qTable).length, epsilon: ai1.epsilon, startTime: Date.now(), history: trainingStatus.history, replayStats: { replays: 0, avgGain: 0 }, totalEpisodesSoFar: trainingStatus.totalEpisodesSoFar, epsilonHistory: [] };
+  trainingStatus = { running: true, episode: startingEpisode, totalEpisodes: startingEpisode + episodes - 1, winRate: 0, states: Object.keys(ai1.qTable).length, epsilon: ai1.epsilon, startTime: Date.now(), history: trainingStatus.history, replayStats: { replays: 0, avgGain: 0 }, totalEpisodesSoFar: trainingStatus.totalEpisodesSoFar, epsilonHistory: [], lastHeartbeat: trainingStatus.lastHeartbeat };
   res.json({ status: 'Entraînement lancé', episodes, startFrom: startingEpisode });
 
   (async () => {
@@ -242,7 +264,6 @@ app.post('/api/train/start', async (req, res) => {
         trainingStatus.states = Object.keys(ai1.qTable).length; 
         trainingStatus.epsilon = ai1.epsilon;
         
-        // 🆕 Tracer epsilon
         trainingStatus.epsilonHistory.push({ episode: ep, epsilon: ai1.epsilon });
         
         const newEntry = { episode: ep, winner: result.winner, ai_score: result.wins[0], opp_score: result.wins[1], epsilon: ai1.epsilon.toFixed(6), ai_states: trainingStatus.states };
@@ -340,7 +361,7 @@ app.get('/api/models/download', (req, res) => {
 });
 
 app.get('/api/stats', (req, res) => {
-  res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.totalEpisodesSoFar, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY } });
+  res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.totalEpisodesSoFar, lastHeartbeat: trainingStatus.lastHeartbeat, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY } });
 });
 
 app.get('/analyse', (req, res) => {
@@ -348,13 +369,14 @@ app.get('/analyse', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>IA Damek</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:600px;margin:0 auto;background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0}h1{color:#4cc9f0;margin-bottom:20px}.info{background:#1a3a3a;padding:15px;border-radius:4px;margin:15px 0;border-left:3px solid #77dd77;color:#aaa;font-size:0.9em}input{width:100%;padding:10px;margin:10px 0;background:#1a1a2e;border:1px solid #4cc9f0;color:#fff;border-radius:4px}button{flex:1;padding:12px;background:#4cc9f0;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:bold}.buttons{display:flex;gap:10px;margin:15px 0}button:hover{background:#f72585}a{text-decoration:none}.stats{background:#1a1a2e;border:1px solid #4cc9f0;padding:15px;border-radius:4px;margin:20px 0}.stat-row{display:flex;justify-content:space-between;margin:10px 0}.stat-label{color:#aaa}.stat-value{color:#4cc9f0;font-weight:bold}.progress-bar{width:100%;height:20px;background:#1a1a2e;border-radius:10px;overflow:hidden;margin:10px 0}.progress-fill{height:100%;background:#4cc9f0;width:0%;transition:width 0.3s}</style></head><body><div class="container"><h1>🤖 IA Damek</h1><div class="info">⭐ FIXÉ (Epsilon OK!)<br>📊 Total: <strong id="tot">-</strong></div><input type="number" id="ep" value="500" min="10" max="1000"><div class="buttons"><button onclick="go()">🚀 Entraîner</button><button onclick="ref()">🔄 Refresh</button><a href="/analyse"><button>📊 Analyse</button></a></div><div class="stats"><div class="stat-row"><span class="stat-label">Partie:</span><span class="stat-value"><span id="e">-</span>/<span id="te">-</span></span></div><div class="stat-row"><span class="stat-label">Victoires:</span><span class="stat-value"><span id="w">-</span>%</span></div><div class="stat-row"><span class="stat-label">États:</span><span class="stat-value"><span id="st">-</span></span></div><div class="stat-row"><span class="stat-label">Epsilon:</span><span class="stat-value"><span id="eps">-</span></span></div><div class="progress-bar"><div class="progress-fill" id="pb"></div></div></div></div><script>async function go(){const n=parseInt(document.getElementById('ep').value);if(n<10){alert('Minimum 10 parties');return}try{const r=await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episodes:n})}),d=await r.json();if(d.error){alert('Erreur: '+d.error)}else{alert('Lancé! Démarrage: '+d.startFrom);ref()}}catch(e){alert('Erreur: '+e.message)}}async function ref(){try{const r1=await fetch('/api/train/status'),s1=await r1.json(),r2=await fetch('/api/stats'),s2=await r2.json();document.getElementById('e').textContent=s1.episode;document.getElementById('te').textContent=s1.totalEpisodes;document.getElementById('tot').textContent=s1.totalHistoryLength;document.getElementById('w').textContent=s1.winRate;document.getElementById('st').textContent=s1.states.toLocaleString();document.getElementById('eps').textContent=s2.epsilon;const p=s1.totalEpisodes?((s1.episode-s1.totalEpisodesSoFar)/(s1.totalEpisodes-s1.totalEpisodesSoFar+1)*100):0;document.getElementById('pb').style.width=p+'%';if(s1.running)setTimeout(ref,2000)}catch(e){console.error(e)}}ref();setInterval(ref,5000)</script></body></html>`);
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>IA Damek</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:600px;margin:0 auto;background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0}h1{color:#4cc9f0;margin-bottom:20px}.info{background:#1a3a3a;padding:15px;border-radius:4px;margin:15px 0;border-left:3px solid #77dd77;color:#aaa;font-size:0.9em}input{width:100%;padding:10px;margin:10px 0;background:#1a1a2e;border:1px solid #4cc9f0;color:#fff;border-radius:4px}button{flex:1;padding:12px;background:#4cc9f0;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:bold}.buttons{display:flex;gap:10px;margin:15px 0}button:hover{background:#f72585}a{text-decoration:none}.stats{background:#1a1a2e;border:1px solid #4cc9f0;padding:15px;border-radius:4px;margin:20px 0}.stat-row{display:flex;justify-content:space-between;margin:10px 0}.stat-label{color:#aaa}.stat-value{color:#4cc9f0;font-weight:bold}.progress-bar{width:100%;height:20px;background:#1a1a2e;border-radius:10px;overflow:hidden;margin:10px 0}.progress-fill{height:100%;background:#4cc9f0;width:0%;transition:width 0.3s}.heartbeat{font-size:0.8em;color:#77dd77}</style></head><body><div class="container"><h1>🤖 IA Damek</h1><div class="info">⭐ AVEC HEARTBEAT (anti-veille)<br>❤️ Ping toutes les 14 min<br>📊 Total: <strong id="tot">-</strong></div><input type="number" id="ep" value="500" min="10" max="1000"><div class="buttons"><button onclick="go()">🚀 Entraîner</button><button onclick="ref()">🔄 Refresh</button><a href="/analyse"><button>📊 Analyse</button></a></div><div class="stats"><div class="stat-row"><span class="stat-label">Partie:</span><span class="stat-value"><span id="e">-</span>/<span id="te">-</span></span></div><div class="stat-row"><span class="stat-label">Victoires:</span><span class="stat-value"><span id="w">-</span>%</span></div><div class="stat-row"><span class="stat-label">États:</span><span class="stat-value"><span id="st">-</span></span></div><div class="stat-row"><span class="stat-label">Epsilon:</span><span class="stat-value"><span id="eps">-</span></span></div><div class="stat-row heartbeat"><span class="stat-label">Heartbeat:</span><span class="stat-value" id="hb">-</span></div><div class="progress-bar"><div class="progress-fill" id="pb"></div></div></div></div><script>async function go(){const n=parseInt(document.getElementById('ep').value);if(n<10){alert('Minimum 10 parties');return}try{const r=await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episodes:n})}),d=await r.json();if(d.error){alert('Erreur: '+d.error)}else{alert('Lancé! Démarrage: '+d.startFrom);ref()}}catch(e){alert('Erreur: '+e.message)}}async function ref(){try{const r1=await fetch('/api/train/status'),s1=await r1.json(),r2=await fetch('/api/stats'),s2=await r2.json();document.getElementById('e').textContent=s1.episode;document.getElementById('te').textContent=s1.totalEpisodes;document.getElementById('tot').textContent=s1.totalHistoryLength;document.getElementById('w').textContent=s1.winRate;document.getElementById('st').textContent=s1.states.toLocaleString();document.getElementById('eps').textContent=s2.epsilon;const hb=new Date(s2.lastHeartbeat).toLocaleTimeString();document.getElementById('hb').textContent=hb;const p=s1.totalEpisodes?((s1.episode-s1.totalEpisodesSoFar)/(s1.totalEpisodes-s1.totalEpisodesSoFar+1)*100):0;document.getElementById('pb').style.width=p+'%';if(s1.running)setTimeout(ref,2000)}catch(e){console.error(e)}}ref();setInterval(ref,5000)</script></body></html>`);
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n✅ Serveur FINAL avec Epsilon FIXÉ! - PORT ${PORT}\n`);
+  console.log(`\n✅ Serveur AVEC HEARTBEAT - PORT ${PORT}\n`);
+  startHeartbeat(); // Lancer le heartbeat au démarrage
 });
 
 server.on('error', (err) => console.error('Error:', err));
