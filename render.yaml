@@ -1,0 +1,30 @@
+# render.yaml - Configuration Render.com
+# Déploie l'app gratuitement sur le cloud
+
+services:
+  - type: web
+    name: damek-ai-training
+    runtime: node
+    plan: free
+    
+    # Démarrage
+    startCommand: npm start
+    
+    # Environnement
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+    
+    # Région (choisir au déploiement)
+    # Options: us-west, us-east, eu-west, etc.
+    
+    # Logs
+    autoDeploy: true
+    
+    # Services de base de données (optionnel)
+    # disk:
+    #   name: training-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
