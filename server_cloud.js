@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR AVEC SUPABASE - COMPLET ET CORRIGÉ
+// 🤖 SERVEUR AVEC SUPABASE - COMPLET ET FIXÉ
 
 const express = require('express');
 const fs = require('fs');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
