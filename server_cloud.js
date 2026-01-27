@@ -203,7 +203,12 @@ class DamekAI {
   chooseAction(board, moves) { if (!moves.length) return null; if (Math.random() < this.epsilon) { return moves[Math.floor(Math.random() * moves.length)]; } const state = this.getBoardHash(board); let bestMove = moves[0]; let bestQ = -Infinity; for (let move of moves) { const key = `${state}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`; const q = this.qTable[key] || 0; if (q > bestQ) { bestQ = q; bestMove = move; } } return bestMove; }
   learn(stateBefore, move, reward, stateAfter) { const key = `${stateBefore}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`; const currentQ = this.qTable[key] || 0; let maxQ = 0; for (let k in this.qTable) { if (k.startsWith(stateAfter + ':')) { maxQ = Math.max(maxQ, this.qTable[k]); } } const newQ = currentQ + this.alpha * (reward + this.gamma * maxQ - currentQ); this.qTable[key] = newQ; this.experiences.push({ stateBefore, move, reward, stateAfter }); if (this.experiences.length > this.maxExperiences) { this.experiences.shift(); } }
   replayLearning(batchSize = 30) { if (this.experiences.length < batchSize) return 0; let totalGain = 0; for (let i = 0; i < batchSize; i++) { const idx = Math.floor(Math.random() * this.experiences.length); const exp = this.experiences[idx]; const key = `${exp.stateBefore}:${exp.move.from[0]},${exp.move.from[1]},${exp.move.to[0]},${exp.move.to[1]}`; const oldQ = this.qTable[key] || 0; let maxQ = 0; for (let k in this.qTable) { if (k.startsWith(exp.stateAfter + ':')) { maxQ = Math.max(maxQ, this.qTable[k]); } } const newQ = oldQ + this.alpha * (exp.reward + this.gamma * maxQ - oldQ); const gain = Math.abs(newQ - oldQ); totalGain += gain; this.qTable[key] = newQ; } return totalGain / batchSize; }
-  decayEpsilon() { this.epsilon *= EPSILON_DECAY; if (this.epsilon < 0.01) this.epsilon = 0.01; if (this.epsilon > 1.0) this.epsilon = 1.0; }
+  decayEpsilon() { 
+    this.epsilon *= EPSILON_DECAY;
+    if (this.epsilon < 0.01) this.epsilon = 0.01;
+    if (this.epsilon > 1.0) this.epsilon = 1.0;
+    console.log(`📉 Epsilon updated: ${this.epsilon.toFixed(6)}`);
+  }
   toJSON() { return JSON.stringify(this.qTable); }
   fromJSON(json) { try { this.qTable = JSON.parse(json); } catch (e) { this.qTable = {}; } }
   cleanup() { const threshold = 0.05; const keys = Object.keys(this.qTable); let removed = 0; for (let key of keys) { if (Math.abs(this.qTable[key]) < threshold) { delete this.qTable[key]; removed++; } } return removed; }
@@ -216,7 +221,12 @@ function playGame(ai1, ai2, timeout = 5000) {
       let board = createBoard(); let turn = 0; let roundNum = 0; let wins = [0, 0];
       while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) { roundNum++; turn = 0;
         while (turn < 100) { const dice = TYPES[Math.floor(Math.random() * 6)]; const ai = turn === 0 ? ai1 : ai2; const moves = getAllMoves(turn, dice, board); if (!moves.length) break; const stateBefore = ai.getBoardHash(board); const move = ai.chooseAction(board, moves); if (!move) break; const result = executeMove(board, move.from, move.to); board = result.board; let reward = 1; if (result.captured) { if (result.captured.spy) { reward = 5000; wins[turn]++; ai.learn(stateBefore, move, reward, ai.getBoardHash(board)); clearTimeout(timeoutId); resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins }); return; } else { reward = 200; } } const stateAfter = ai.getBoardHash(board); ai.learn(stateBefore, move, reward, stateAfter); turn = 1 - turn; } }
-      ai1.decayEpsilon(); ai2.decayEpsilon();
+      
+      // 🆕 DÉCAYER EPSILON À CHAQUE FIN DE PARTIE
+      ai1.decayEpsilon(); 
+      ai2.decayEpsilon();
+      console.log(`📉 Epsilon décayé: ${ai1.epsilon.toFixed(6)}`);
+      
       clearTimeout(timeoutId); resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins });
     } catch (e) { console.error('Game error:', e); clearTimeout(timeoutId); resolve({ winner: 0, wins: [0, 0] }); }
   });
