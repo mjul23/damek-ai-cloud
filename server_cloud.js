@@ -497,9 +497,43 @@ app.get('/api/supabase/count', async (req, res) => {
   }
 });
 
-app.get('/api/models/download', (req, res) => {
-  try { const ai1Data = JSON.parse(ai1.toJSON()); const ai2Data = JSON.parse(ai2.toJSON());
-    res.json({ ai1: ai1Data, ai2: ai2Data, timestamp: new Date().toISOString() }); } catch (e) { res.status(500).json({ error: e.message }); }
+app.get('/api/supabase/count', async (req, res) => {
+  try {
+    const { count, error } = await supabase
+      .from('history')
+      .select('*', { count: 'exact', head: true });
+    
+    if (error) {
+      console.error(`❌ Erreur count:`, error.message);
+      return res.json({ count: 0 });
+    }
+    
+    console.log(`✅ Total Supabase: ${count} parties`);
+    res.json({ count: count || 0 });
+  } catch (e) {
+    console.error(`🚨 Erreur:`, e.message);
+    res.json({ count: 0 });
+  }
+});
+
+app.get('/api/supabase/history', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('history')
+      .select('*', { count: 'exact' })
+      .order('episode', { ascending: true });
+    
+    if (error) {
+      console.error(`❌ Erreur fetch history:`, error.message);
+      return res.json([]);
+    }
+    
+    console.log(`✅ Supabase history: ${data ? data.length : 0} parties chargées!`);
+    res.json(data || []);
+  } catch (e) {
+    console.error(`🚨 Erreur:`, e.message);
+    res.json([]);
+  }
 });
 
 app.get('/api/stats', (req, res) => {
