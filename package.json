@@ -1,27 +1,21 @@
 {
-  "name": "damek-ai-training-cloud",
+  "name": "damek-ai",
   "version": "1.0.0",
-  "description": "🤖 IA Dämek - Cloud Training Server",
+  "description": "IA Q-Learning pour jeu Damek",
   "main": "server_cloud.js",
   "scripts": {
-    "start": "node server_cloud.js",
-    "dev": "node server_cloud.js",
-    "@supabase/supabase-js": "^2.38.0"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5"
-  },
-  "engines": {
-    "node": "18.x"
+    "start": "node server_cloud.js"
   },
   "keywords": [
-    "damek",
     "ai",
-    "machine-learning",
-    "reinforcement-learning",
-    "cloud"
+    "qlearning",
+    "damek"
   ],
-  "author": "Julien",
-  "license": "MIT"
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@supabase/supabase-js": "^2.38.0"
+  }
 }
