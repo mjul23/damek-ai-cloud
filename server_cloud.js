@@ -518,17 +518,20 @@ app.get('/api/supabase/count', async (req, res) => {
 
 app.get('/api/supabase/history', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // 🆕 Charger TOUTES les parties - Supabase par défaut limite à 1000
+    // Faut utiliser range() pour ignorer la limite
+    const { data, error, count } = await supabase
       .from('history')
       .select('*', { count: 'exact' })
-      .order('episode', { ascending: true });
+      .order('episode', { ascending: true })
+      .range(0, 10000);  // 🆕 Charger jusqu'à 10000 lignes!
     
     if (error) {
       console.error(`❌ Erreur fetch history:`, error.message);
       return res.json([]);
     }
     
-    console.log(`✅ Supabase history: ${data ? data.length : 0} parties chargées!`);
+    console.log(`✅ Supabase history: ${data ? data.length : 0} parties chargées! (count: ${count})`);
     res.json(data || []);
   } catch (e) {
     console.error(`🚨 Erreur:`, e.message);
