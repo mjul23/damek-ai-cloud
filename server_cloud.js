@@ -232,8 +232,36 @@ function playGame(ai1, ai2, timeout = 5000) {
   });
 }
 
-let ai1 = new DamekAI(0); let ai2 = new DamekAI(1);
-try { if (fs.existsSync('ai1.json')) { ai1.fromJSON(fs.readFileSync('ai1.json', 'utf-8')); } if (fs.existsSync('ai2.json')) { ai2.fromJSON(fs.readFileSync('ai2.json', 'utf-8')); } } catch (e) { }
+let ai1 = new DamekAI(0); 
+let ai2 = new DamekAI(1);
+
+// Charger les modèles locaux d'abord
+try { 
+  if (fs.existsSync('ai1.json')) { 
+    ai1.fromJSON(fs.readFileSync('ai1.json', 'utf-8')); 
+    console.log(`✅ AI1 local chargé: ${Object.keys(ai1.qTable).length} états`);
+  } 
+  if (fs.existsSync('ai2.json')) { 
+    ai2.fromJSON(fs.readFileSync('ai2.json', 'utf-8')); 
+    console.log(`✅ AI2 local chargé: ${Object.keys(ai2.qTable).length} états`);
+  } 
+} catch (e) { 
+  console.error(`⚠️ Erreur chargement local:`, e.message);
+}
+
+// Charger les modèles depuis Supabase aussi
+loadModelsFromSupabase().then(models => {
+  if (models.ai1) {
+    ai1.fromJSON(models.ai1);
+    console.log(`✅ AI1 Supabase chargé: ${Object.keys(ai1.qTable).length} états`);
+  }
+  if (models.ai2) {
+    ai2.fromJSON(models.ai2);
+    console.log(`✅ AI2 Supabase chargé: ${Object.keys(ai2.qTable).length} états`);
+  }
+}).catch(e => {
+  console.error(`⚠️ Erreur chargement Supabase:`, e.message);
+});
 
 function startHeartbeat() {
   setInterval(() => {
@@ -262,6 +290,11 @@ app.post('/api/train/start', async (req, res) => {
         const newEntry = { episode: ep, winner: result.winner, ai_score: result.wins[0], opp_score: result.wins[1], epsilon: ai1.epsilon.toFixed(6), ai_states: trainingStatus.states };
         trainingStatus.history.push(newEntry);
         if (trainingStatus.history.length > MAX_HISTORY) { trainingStatus.history.shift(); }
+        
+        // Log epsilon
+        if (ep % 10 === 0) {
+          console.log(`📊 Partie ${ep}: Epsilon=${ai1.epsilon.toFixed(6)}, States=${Object.keys(ai1.qTable).length}`);
+        }
         
         // 🆕 SAUVEGARDER DANS SUPABASE IMMÉDIATEMENT
         await savePartyToSupabase(newEntry);
