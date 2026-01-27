@@ -5,7 +5,8 @@
   "main": "server_cloud.js",
   "scripts": {
     "start": "node server_cloud.js",
-    "dev": "node server_cloud.js"
+    "dev": "node server_cloud.js",
+    "@supabase/supabase-js": "^2.38.0"
   },
   "dependencies": {
     "express": "^4.18.2",
