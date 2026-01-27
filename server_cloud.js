@@ -56,6 +56,29 @@ let trainingStatus = {
 
 // ===== FONCTIONS SUPABASE =====
 
+// 🆕 CHARGER LE DERNIER EPISODE DEPUIS SUPABASE
+async function loadLastEpisodeFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('history')
+      .select('episode')
+      .order('episode', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !data) {
+      console.log(`📂 Aucun episode trouvé - Démarrage à 0`);
+      return 0;
+    }
+
+    console.log(`✅ Dernier episode: ${data.episode}`);
+    return data.episode;
+  } catch (e) {
+    console.error(`⚠️ Erreur chargement episode:`, e.message);
+    return 0;
+  }
+}
+
 // 🆕 CHARGER L'HISTORIQUE DEPUIS SUPABASE
 async function loadHistoryFromSupabase() {
   try {
@@ -224,6 +247,16 @@ loadHistoryFromSupabase().then(loaded => {
   console.log(`✅ Initialisation Supabase: ${loaded} parties chargées`);
 }).catch(e => {
   console.error(`❌ Erreur initialisation historique:`, e.message);
+});
+
+// Charger le dernier episode pour continuer correctement
+loadLastEpisodeFromSupabase().then(lastEpisode => {
+  if (lastEpisode > 0) {
+    trainingStatus.totalEpisodesSoFar = lastEpisode;
+    console.log(`✅ Dernier episode chargé: ${lastEpisode}`);
+  }
+}).catch(e => {
+  console.error(`❌ Erreur episode:`, e.message);
 });
 
 let trainingInProgress = false;
