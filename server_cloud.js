@@ -261,20 +261,65 @@ class DamekAI {
 
 function playGame(ai1, ai2, timeout = 5000) {
   return new Promise((resolve) => {
-    const timeoutId = setTimeout(() => resolve({ winner: 0, wins: [0, 0] }), timeout);
+    const timeoutId = setTimeout(() => {
+      ai1.decayEpsilon();
+      ai2.decayEpsilon();
+      resolve({ winner: 0, wins: [0, 0] });
+    }, timeout);
     try {
       let board = createBoard(); let turn = 0; let roundNum = 0; let wins = [0, 0];
-      while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) { roundNum++; turn = 0;
-        while (turn < 100) { const dice = TYPES[Math.floor(Math.random() * 6)]; const ai = turn === 0 ? ai1 : ai2; const moves = getAllMoves(turn, dice, board); if (!moves.length) break; const stateBefore = ai.getBoardHash(board); const move = ai.chooseAction(board, moves); if (!move) break; const result = executeMove(board, move.from, move.to); board = result.board; let reward = 1; if (result.captured) { if (result.captured.spy) { reward = 5000; wins[turn]++; ai.learn(stateBefore, move, reward, ai.getBoardHash(board)); clearTimeout(timeoutId); resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins }); return; } else { reward = 200; } } const stateAfter = ai.getBoardHash(board); ai.learn(stateBefore, move, reward, stateAfter); turn = 1 - turn; } }
+      while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) { 
+        roundNum++; turn = 0;
+        while (turn < 100) { 
+          const dice = TYPES[Math.floor(Math.random() * 6)]; 
+          const ai = turn === 0 ? ai1 : ai2; 
+          const moves = getAllMoves(turn, dice, board); 
+          if (!moves.length) break; 
+          const stateBefore = ai.getBoardHash(board); 
+          const move = ai.chooseAction(board, moves); 
+          if (!move) break; 
+          const result = executeMove(board, move.from, move.to); 
+          board = result.board; 
+          let reward = 1; 
+          if (result.captured) { 
+            if (result.captured.spy) { 
+              reward = 5000; 
+              wins[turn]++; 
+              ai.learn(stateBefore, move, reward, ai.getBoardHash(board)); 
+              
+              // 🆕 DECAY ICI!
+              console.log(`🔴 Spy capturé! Decay epsilon`);
+              ai1.decayEpsilon();
+              ai2.decayEpsilon();
+              
+              clearTimeout(timeoutId); 
+              resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins }); 
+              return; 
+            } else { 
+              reward = 200; 
+            } 
+          } 
+          const stateAfter = ai.getBoardHash(board); 
+          ai.learn(stateBefore, move, reward, stateAfter); 
+          turn = 1 - turn; 
+        } 
+      }
       
-      // 🔴 DEBUG: Avant decay
-      console.log(`🔴 AVANT DECAY: ai1.epsilon = ${ai1.epsilon.toFixed(8)}`);
+      // 🔴 DECAY À LA FIN NORMALE
+      console.log(`🔴 Fin de partie normale. Decay epsilon: ${ai1.epsilon.toFixed(6)} → ${(ai1.epsilon * 0.995).toFixed(6)}`);
       ai1.decayEpsilon(); 
       ai2.decayEpsilon();
-      console.log(`🔴 APRÈS DECAY: ai1.epsilon = ${ai1.epsilon.toFixed(8)}`);
+      console.log(`🔴 Après decay: ${ai1.epsilon.toFixed(6)}`);
       
-      clearTimeout(timeoutId); resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins });
-    } catch (e) { console.error('Game error:', e); clearTimeout(timeoutId); resolve({ winner: 0, wins: [0, 0] }); }
+      clearTimeout(timeoutId); 
+      resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins });
+    } catch (e) { 
+      console.error('Game error:', e); 
+      ai1.decayEpsilon();
+      ai2.decayEpsilon();
+      clearTimeout(timeoutId); 
+      resolve({ winner: 0, wins: [0, 0] }); 
+    }
   });
 }
 
