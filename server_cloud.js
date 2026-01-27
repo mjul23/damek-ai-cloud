@@ -410,8 +410,12 @@ app.post('/api/train/start', async (req, res) => {
   const { episodes = 1000 } = req.body;
   if (trainingInProgress) { return res.json({ error: 'Entraînement déjà en cours' }); }
   trainingInProgress = true;
-  const startingEpisode = trainingStatus.totalEpisodesSoFar + 1;
-  trainingStatus = { running: true, episode: startingEpisode, totalEpisodes: startingEpisode + episodes - 1, winRate: 0, states: Object.keys(ai1.qTable).length, epsilon: ai1.epsilon, startTime: Date.now(), history: trainingStatus.history, replayStats: { replays: 0, avgGain: 0 }, totalEpisodesSoFar: trainingStatus.totalEpisodesSoFar, epsilonHistory: [], lastHeartbeat: trainingStatus.lastHeartbeat, dbStatus: trainingStatus.dbStatus };
+  
+  // 🆕 CHARGER LE DERNIER EPISODE DEPUIS SUPABASE
+  const lastEpisode = await loadLastEpisodeFromSupabase();
+  const startingEpisode = lastEpisode + 1;  // ← Continuer depuis le dernier!
+  
+  trainingStatus = { running: true, episode: startingEpisode, totalEpisodes: startingEpisode + episodes - 1, winRate: 0, states: Object.keys(ai1.qTable).length, epsilon: ai1.epsilon, startTime: Date.now(), history: trainingStatus.history, replayStats: { replays: 0, avgGain: 0 }, totalEpisodesSoFar: lastEpisode, epsilonHistory: [], lastHeartbeat: trainingStatus.lastHeartbeat, dbStatus: trainingStatus.dbStatus };
   res.json({ status: 'Entraînement lancé', episodes, startFrom: startingEpisode });
 
   (async () => {
