@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR AVEC SUPABASE - HISTORIQUE VRAIMENT PERSISTANT!
-// Les données ne seront JAMAIS perdues
+// 🤖 SERVEUR AVEC SUPABASE - COMPLET ET CORRIGÉ
 
 const express = require('express');
 const fs = require('fs');
@@ -115,7 +114,13 @@ async function savePartyToSupabase(party) {
   }
 }
 
-const totalLoaded = await loadHistoryFromSupabase();
+// Charger l'historique au démarrage (sans await au top level)
+loadHistoryFromSupabase().then(loaded => {
+  console.log(`✅ Initialisation Supabase complète: ${loaded} parties chargées`);
+}).catch(e => {
+  console.error(`❌ Erreur initialisation:`, e.message);
+});
+
 let trainingInProgress = false;
 
 const MOVES = {
