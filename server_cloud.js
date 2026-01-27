@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR AVEC SUPABASE - COMPLET ET CORRIGÉ
+// 🤖 SERVEUR AVEC SUPABASE + EPSILON PERSISTANT - FINAL!
 
 const express = require('express');
 const fs = require('fs');
@@ -53,6 +53,8 @@ let trainingStatus = {
   lastHeartbeat: new Date(),
   dbStatus: 'CONNECTING'
 };
+
+// ===== FONCTIONS SUPABASE =====
 
 // 🆕 CHARGER L'HISTORIQUE DEPUIS SUPABASE
 async function loadHistoryFromSupabase() {
@@ -115,6 +117,66 @@ async function savePartyToSupabase(party) {
   }
 }
 
+// 🆕 CHARGER LES MODÈLES DEPUIS SUPABASE
+async function loadModelsFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('models')
+      .select('*')
+      .eq('id', 1)
+      .single();
+
+    if (error || !data) {
+      console.log(`📂 Pas de modèles sauvegardés - Démarrage fresh`);
+      return { ai1: null, ai2: null };
+    }
+
+    console.log(`✅ Modèles chargés depuis Supabase`);
+    return {
+      ai1: data.ai1_model,
+      ai2: data.ai2_model
+    };
+  } catch (e) {
+    console.error(`⚠️ Erreur chargement modèles:`, e.message);
+    return { ai1: null, ai2: null };
+  }
+}
+
+// 🆕 SAUVEGARDER LES MODÈLES DANS SUPABASE
+async function saveModelsToSupabase(ai1, ai2) {
+  try {
+    const models = {
+      ai1_model: ai1.toJSON(),
+      ai2_model: ai2.toJSON(),
+      timestamp: new Date().toISOString(),
+      ai1_states: Object.keys(ai1.qTable).length,
+      ai2_states: Object.keys(ai2.qTable).length
+    };
+
+    const { data, error } = await supabase
+      .from('models')
+      .upsert([{
+        id: 1,
+        ai1_model: models.ai1_model,
+        ai2_model: models.ai2_model,
+        timestamp: models.timestamp,
+        ai1_states: models.ai1_states,
+        ai2_states: models.ai2_states
+      }]);
+
+    if (error) {
+      console.error(`❌ Erreur save modèles:`, error.message);
+      return false;
+    }
+
+    console.log(`✅ Modèles sauvegardés: AI1=${models.ai1_states} états, AI2=${models.ai2_states} états`);
+    return true;
+  } catch (e) {
+    console.error(`🚨 Erreur save modèles:`, e.message);
+    return false;
+  }
+}
+
 // 🆕 CHARGER EPSILON DEPUIS SUPABASE
 async function loadEpsilonFromSupabase() {
   try {
@@ -157,55 +219,11 @@ async function saveEpsilonToSupabase(epsilon) {
   }
 }
 
-// 🆕 SAUVEGARDER LES MODÈLES DANS SUPABASE
-async function saveModelsToSupabase(ai1, ai2) {
-  try {
-    const models = {
-      ai1_model: ai1.toJSON(),
-      ai2_model: ai2.toJSON(),
-      timestamp: new Date().toISOString(),
-      ai1_states: Object.keys(ai1.qTable).length,
-      ai2_states: Object.keys(ai2.qTable).length
-    };
-
-    const { data, error } = await supabase
-      .from('models')
-      .upsert([{
-        id: 1,
-        ai1_model: models.ai1_model,
-        ai2_model: models.ai2_model,
-        timestamp: models.timestamp,
-        ai1_states: models.ai1_states,
-        ai2_states: models.ai2_states
-      }]);
-
-    if (error) {
-      console.error(`❌ Erreur save modèles:`, error.message);
-      return false;
-    }
-
-    console.log(`✅ Modèles sauvegardés: AI1=${models.ai1_states} états, AI2=${models.ai2_states} états`);
-    return true;
-  } catch (e) {
-    console.error(`🚨 Erreur save modèles:`, e.message);
-    return false;
-  }
-}
-
-// Charger l'historique et modèles au démarrage
+// Charger l'historique au démarrage
 loadHistoryFromSupabase().then(loaded => {
   console.log(`✅ Initialisation Supabase: ${loaded} parties chargées`);
 }).catch(e => {
   console.error(`❌ Erreur initialisation historique:`, e.message);
-});
-
-// Charger epsilon depuis Supabase
-loadEpsilonFromSupabase().then(epsilon => {
-  ai1.epsilon = epsilon;
-  ai2.epsilon = epsilon;
-  console.log(`✅ Epsilon chargé: ${epsilon.toFixed(6)}`);
-}).catch(e => {
-  console.error(`⚠️ Erreur epsilon:`, e.message);
 });
 
 let trainingInProgress = false;
@@ -229,12 +247,7 @@ class DamekAI {
   chooseAction(board, moves) { if (!moves.length) return null; if (Math.random() < this.epsilon) { return moves[Math.floor(Math.random() * moves.length)]; } const state = this.getBoardHash(board); let bestMove = moves[0]; let bestQ = -Infinity; for (let move of moves) { const key = `${state}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`; const q = this.qTable[key] || 0; if (q > bestQ) { bestQ = q; bestMove = move; } } return bestMove; }
   learn(stateBefore, move, reward, stateAfter) { const key = `${stateBefore}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`; const currentQ = this.qTable[key] || 0; let maxQ = 0; for (let k in this.qTable) { if (k.startsWith(stateAfter + ':')) { maxQ = Math.max(maxQ, this.qTable[k]); } } const newQ = currentQ + this.alpha * (reward + this.gamma * maxQ - currentQ); this.qTable[key] = newQ; this.experiences.push({ stateBefore, move, reward, stateAfter }); if (this.experiences.length > this.maxExperiences) { this.experiences.shift(); } }
   replayLearning(batchSize = 30) { if (this.experiences.length < batchSize) return 0; let totalGain = 0; for (let i = 0; i < batchSize; i++) { const idx = Math.floor(Math.random() * this.experiences.length); const exp = this.experiences[idx]; const key = `${exp.stateBefore}:${exp.move.from[0]},${exp.move.from[1]},${exp.move.to[0]},${exp.move.to[1]}`; const oldQ = this.qTable[key] || 0; let maxQ = 0; for (let k in this.qTable) { if (k.startsWith(exp.stateAfter + ':')) { maxQ = Math.max(maxQ, this.qTable[k]); } } const newQ = oldQ + this.alpha * (exp.reward + this.gamma * maxQ - oldQ); const gain = Math.abs(newQ - oldQ); totalGain += gain; this.qTable[key] = newQ; } return totalGain / batchSize; }
-  decayEpsilon() { 
-    this.epsilon *= EPSILON_DECAY;
-    if (this.epsilon < 0.01) this.epsilon = 0.01;
-    if (this.epsilon > 1.0) this.epsilon = 1.0;
-    console.log(`📉 Epsilon updated: ${this.epsilon.toFixed(6)}`);
-  }
+  decayEpsilon() { this.epsilon *= EPSILON_DECAY; if (this.epsilon < 0.01) this.epsilon = 0.01; if (this.epsilon > 1.0) this.epsilon = 1.0; }
   toJSON() { return JSON.stringify(this.qTable); }
   fromJSON(json) { try { this.qTable = JSON.parse(json); } catch (e) { this.qTable = {}; } }
   cleanup() { const threshold = 0.05; const keys = Object.keys(this.qTable); let removed = 0; for (let key of keys) { if (Math.abs(this.qTable[key]) < threshold) { delete this.qTable[key]; removed++; } } return removed; }
@@ -247,12 +260,7 @@ function playGame(ai1, ai2, timeout = 5000) {
       let board = createBoard(); let turn = 0; let roundNum = 0; let wins = [0, 0];
       while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) { roundNum++; turn = 0;
         while (turn < 100) { const dice = TYPES[Math.floor(Math.random() * 6)]; const ai = turn === 0 ? ai1 : ai2; const moves = getAllMoves(turn, dice, board); if (!moves.length) break; const stateBefore = ai.getBoardHash(board); const move = ai.chooseAction(board, moves); if (!move) break; const result = executeMove(board, move.from, move.to); board = result.board; let reward = 1; if (result.captured) { if (result.captured.spy) { reward = 5000; wins[turn]++; ai.learn(stateBefore, move, reward, ai.getBoardHash(board)); clearTimeout(timeoutId); resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins }); return; } else { reward = 200; } } const stateAfter = ai.getBoardHash(board); ai.learn(stateBefore, move, reward, stateAfter); turn = 1 - turn; } }
-      
-      // 🆕 DÉCAYER EPSILON À CHAQUE FIN DE PARTIE
-      ai1.decayEpsilon(); 
-      ai2.decayEpsilon();
-      console.log(`📉 Epsilon décayé: ${ai1.epsilon.toFixed(6)}`);
-      
+      ai1.decayEpsilon(); ai2.decayEpsilon();
       clearTimeout(timeoutId); resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins });
     } catch (e) { console.error('Game error:', e); clearTimeout(timeoutId); resolve({ winner: 0, wins: [0, 0] }); }
   });
@@ -289,6 +297,15 @@ loadModelsFromSupabase().then(models => {
   console.error(`⚠️ Erreur chargement Supabase:`, e.message);
 });
 
+// Charger epsilon depuis Supabase
+loadEpsilonFromSupabase().then(epsilon => {
+  ai1.epsilon = epsilon;
+  ai2.epsilon = epsilon;
+  console.log(`✅ Epsilon chargé: ${epsilon.toFixed(6)}`);
+}).catch(e => {
+  console.error(`⚠️ Erreur epsilon:`, e.message);
+});
+
 function startHeartbeat() {
   setInterval(() => {
     const now = new Date();
@@ -317,13 +334,11 @@ app.post('/api/train/start', async (req, res) => {
         trainingStatus.history.push(newEntry);
         if (trainingStatus.history.length > MAX_HISTORY) { trainingStatus.history.shift(); }
         
-        // Log epsilon
+        await savePartyToSupabase(newEntry);
+        
         if (ep % 10 === 0) {
           console.log(`📊 Partie ${ep}: Epsilon=${ai1.epsilon.toFixed(6)}, States=${Object.keys(ai1.qTable).length}`);
         }
-        
-        // 🆕 SAUVEGARDER DANS SUPABASE IMMÉDIATEMENT
-        await savePartyToSupabase(newEntry);
         
         const wins = trainingStatus.history.filter(h => h.winner === 0).length; trainingStatus.winRate = (wins / trainingStatus.history.length * 100).toFixed(1);
 
@@ -337,7 +352,6 @@ app.post('/api/train/start', async (req, res) => {
             fs.writeFileSync('ai1.json', ai1.toJSON());
             fs.writeFileSync('ai2.json', ai2.toJSON());
             
-            // 🆕 SAUVEGARDER AUSSI DANS SUPABASE + EPSILON
             await saveModelsToSupabase(ai1, ai2);
             await saveEpsilonToSupabase(ai1.epsilon);
             
@@ -357,7 +371,6 @@ app.post('/api/train/start', async (req, res) => {
         fs.writeFileSync('ai1.json', ai1.toJSON());
         fs.writeFileSync('ai2.json', ai2.toJSON());
         
-        // 🆕 SAUVEGARDER DANS SUPABASE À LA FIN + EPSILON
         await saveModelsToSupabase(ai1, ai2);
         await saveEpsilonToSupabase(ai1.epsilon);
       } catch (e) { console.error('Final save error:', e); }
