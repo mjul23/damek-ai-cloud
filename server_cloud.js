@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 🤖 SERVEUR AVEC SUPABASE - COMPLET ET FIXÉ
+// 🤖 SERVEUR AVEC SUPABASE - COMPLET ET CORRIGÉ
 
 const express = require('express');
 const fs = require('fs');
@@ -53,6 +53,41 @@ let trainingStatus = {
   lastHeartbeat: new Date(),
   dbStatus: 'CONNECTING'
 };
+
+// 🆕 CHARGER L'HISTORIQUE DEPUIS SUPABASE
+async function loadHistoryFromSupabase() {
+  try {
+    console.log(`📂 Chargement de l'historique depuis Supabase...`);
+    
+    const { data, error } = await supabase
+      .from('history')
+      .select('*')
+      .order('episode', { ascending: true });
+    
+    if (error) {
+      console.error(`❌ Erreur Supabase:`, error.message);
+      trainingStatus.dbStatus = `ERROR: ${error.message}`;
+      return 0;
+    }
+    
+    if (!data || data.length === 0) {
+      console.log(`📂 Supabase vide - Démarrage à zéro`);
+      trainingStatus.dbStatus = 'EMPTY - Starting fresh';
+      return 0;
+    }
+    
+    console.log(`✅ Chargé ${data.length} parties depuis Supabase!`);
+    trainingStatus.history = data.slice(-MAX_HISTORY);
+    trainingStatus.totalEpisodesSoFar = data.length;
+    trainingStatus.dbStatus = `OK - ${data.length} parties chargées`;
+    
+    return data.length;
+  } catch (e) {
+    console.error(`🚨 Erreur critique:`, e.message);
+    trainingStatus.dbStatus = `CRITICAL: ${e.message}`;
+    return 0;
+  }
+}
 
 // 🆕 SAUVEGARDER UNE PARTIE DANS SUPABASE
 async function savePartyToSupabase(party) {
@@ -140,85 +175,11 @@ async function saveModelsToSupabase(ai1, ai2) {
   }
 }
 
-// 🆕 SAUVEGARDER LES MODÈLES DANS SUPABASE
-async function saveModelsToSupabase(ai1, ai2) {
-  try {
-    const models = {
-      ai1_model: ai1.toJSON(),
-      ai2_model: ai2.toJSON(),
-      timestamp: new Date().toISOString(),
-      ai1_states: Object.keys(ai1.qTable).length,
-      ai2_states: Object.keys(ai2.qTable).length
-    };
-
-    const { data, error } = await supabase
-      .from('models')
-      .upsert([{
-        id: 1,
-        ai1_model: models.ai1_model,
-        ai2_model: models.ai2_model,
-        timestamp: models.timestamp,
-        ai1_states: models.ai1_states,
-        ai2_states: models.ai2_states
-      }]);
-
-    if (error) {
-      console.error(`❌ Erreur save modèles:`, error.message);
-      return false;
-    }
-
-    console.log(`✅ Modèles sauvegardés: AI1=${models.ai1_states} états, AI2=${models.ai2_states} états`);
-    return true;
-  } catch (e) {
-    console.error(`🚨 Erreur save modèles:`, e.message);
-    return false;
-  }
-}
-
-// 🆕 CHARGER LES MODÈLES DEPUIS SUPABASE
-async function loadModelsFromSupabase() {
-  try {
-    const { data, error } = await supabase
-      .from('models')
-      .select('*')
-      .eq('id', 1)
-      .single();
-
-    if (error || !data) {
-      console.log(`📂 Pas de modèles sauvegardés - Démarrage fresh`);
-      return { ai1: null, ai2: null };
-    }
-
-    console.log(`✅ Modèles chargés depuis Supabase`);
-    return {
-      ai1: data.ai1_model,
-      ai2: data.ai2_model
-    };
-  } catch (e) {
-    console.error(`⚠️ Erreur chargement modèles:`, e.message);
-    return { ai1: null, ai2: null };
-  }
-}
-
-// Charger l'historique au démarrage (sans await au top level)
+// Charger l'historique et modèles au démarrage
 loadHistoryFromSupabase().then(loaded => {
-  console.log(`✅ Initialisation Supabase complète: ${loaded} parties chargées`);
+  console.log(`✅ Initialisation Supabase: ${loaded} parties chargées`);
 }).catch(e => {
-  console.error(`❌ Erreur initialisation:`, e.message);
-});
-
-// Charger les modèles depuis Supabase
-loadModelsFromSupabase().then(models => {
-  if (models.ai1) {
-    ai1.fromJSON(models.ai1);
-    console.log(`✅ Modèle AI1 chargé depuis Supabase`);
-  }
-  if (models.ai2) {
-    ai2.fromJSON(models.ai2);
-    console.log(`✅ Modèle AI2 chargé depuis Supabase`);
-  }
-}).catch(e => {
-  console.error(`❌ Erreur chargement modèles:`, e.message);
+  console.error(`❌ Erreur initialisation historique:`, e.message);
 });
 
 let trainingInProgress = false;
@@ -344,14 +305,6 @@ app.get('/api/train/status', (req, res) => {
 
 app.get('/api/train/history', (req, res) => res.json(trainingStatus.history));
 app.get('/api/epsilon/history', (req, res) => res.json(trainingStatus.epsilonHistory));
-app.get('/api/models/download', (req, res) => {
-  try { const ai1Data = JSON.parse(ai1.toJSON()); const ai2Data = JSON.parse(ai2.toJSON());
-    res.json({ ai1: ai1Data, ai2: ai2Data, timestamp: new Date().toISOString() }); } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/stats', (req, res) => {
-  res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.totalEpisodesSoFar, lastHeartbeat: trainingStatus.lastHeartbeat, dbStatus: trainingStatus.dbStatus, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY } });
-});
 
 app.get('/api/supabase/history', async (req, res) => {
   try {
@@ -368,6 +321,15 @@ app.get('/api/supabase/history', async (req, res) => {
   } catch (e) {
     res.json([]);
   }
+});
+
+app.get('/api/models/download', (req, res) => {
+  try { const ai1Data = JSON.parse(ai1.toJSON()); const ai2Data = JSON.parse(ai2.toJSON());
+    res.json({ ai1: ai1Data, ai2: ai2Data, timestamp: new Date().toISOString() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/stats', (req, res) => {
+  res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.totalEpisodesSoFar, lastHeartbeat: trainingStatus.lastHeartbeat, dbStatus: trainingStatus.dbStatus, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY } });
 });
 
 app.get('/analyse', (req, res) => {
