@@ -242,21 +242,12 @@ async function saveEpsilonToSupabase(epsilon) {
   }
 }
 
-// Charger l'historique au démarrage
+// Charger l'historique au démarrage (charge aussi totalEpisodesSoFar!)
 loadHistoryFromSupabase().then(loaded => {
   console.log(`✅ Initialisation Supabase: ${loaded} parties chargées`);
+  console.log(`✅ totalEpisodesSoFar = ${trainingStatus.totalEpisodesSoFar}`);
 }).catch(e => {
   console.error(`❌ Erreur initialisation historique:`, e.message);
-});
-
-// Charger le dernier episode pour continuer correctement
-loadLastEpisodeFromSupabase().then(lastEpisode => {
-  if (lastEpisode > 0) {
-    trainingStatus.totalEpisodesSoFar = lastEpisode;
-    console.log(`✅ Dernier episode chargé: ${lastEpisode}`);
-  }
-}).catch(e => {
-  console.error(`❌ Erreur episode:`, e.message);
 });
 
 let trainingInProgress = false;
