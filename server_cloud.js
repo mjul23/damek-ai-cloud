@@ -452,9 +452,10 @@ app.get('/api/epsilon/history', (req, res) => res.json(trainingStatus.epsilonHis
 
 app.get('/api/supabase/history', async (req, res) => {
   try {
+    // 🆕 Charger TOUTES les parties sans limite
     const { data, error } = await supabase
       .from('history')
-      .select('*')
+      .select('*', { count: 'exact' })
       .order('episode', { ascending: true });
     
     if (error) {
@@ -462,7 +463,7 @@ app.get('/api/supabase/history', async (req, res) => {
       return res.json([]);
     }
     
-    console.log(`✅ Supabase history: ${data ? data.length : 0} parties`);
+    console.log(`✅ Supabase history: ${data ? data.length : 0} parties chargées!`);
     res.json(data || []);
   } catch (e) {
     console.error(`🚨 Erreur:`, e.message);
