@@ -30,7 +30,7 @@ app.use(express.json({ limit: '10mb' }));
 
 const TYPES = ['PION', 'CAVALIER', 'FOU', 'TOUR', 'ROI', 'DAME'];
 const LEARNING_RATE = 0.25;
-const EPSILON_DECAY = 0.9985;
+const EPSILON_DECAY = 0.995;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
 const GAMMA = 0.99;
 
 const MAX_BUFFER = 2000;
@@ -247,7 +247,13 @@ class DamekAI {
   chooseAction(board, moves) { if (!moves.length) return null; if (Math.random() < this.epsilon) { return moves[Math.floor(Math.random() * moves.length)]; } const state = this.getBoardHash(board); let bestMove = moves[0]; let bestQ = -Infinity; for (let move of moves) { const key = `${state}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`; const q = this.qTable[key] || 0; if (q > bestQ) { bestQ = q; bestMove = move; } } return bestMove; }
   learn(stateBefore, move, reward, stateAfter) { const key = `${stateBefore}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`; const currentQ = this.qTable[key] || 0; let maxQ = 0; for (let k in this.qTable) { if (k.startsWith(stateAfter + ':')) { maxQ = Math.max(maxQ, this.qTable[k]); } } const newQ = currentQ + this.alpha * (reward + this.gamma * maxQ - currentQ); this.qTable[key] = newQ; this.experiences.push({ stateBefore, move, reward, stateAfter }); if (this.experiences.length > this.maxExperiences) { this.experiences.shift(); } }
   replayLearning(batchSize = 30) { if (this.experiences.length < batchSize) return 0; let totalGain = 0; for (let i = 0; i < batchSize; i++) { const idx = Math.floor(Math.random() * this.experiences.length); const exp = this.experiences[idx]; const key = `${exp.stateBefore}:${exp.move.from[0]},${exp.move.from[1]},${exp.move.to[0]},${exp.move.to[1]}`; const oldQ = this.qTable[key] || 0; let maxQ = 0; for (let k in this.qTable) { if (k.startsWith(exp.stateAfter + ':')) { maxQ = Math.max(maxQ, this.qTable[k]); } } const newQ = oldQ + this.alpha * (exp.reward + this.gamma * maxQ - oldQ); const gain = Math.abs(newQ - oldQ); totalGain += gain; this.qTable[key] = newQ; } return totalGain / batchSize; }
-  decayEpsilon() { this.epsilon *= EPSILON_DECAY; if (this.epsilon < 0.01) this.epsilon = 0.01; if (this.epsilon > 1.0) this.epsilon = 1.0; }
+  decayEpsilon() { 
+    const oldEps = this.epsilon;
+    this.epsilon *= EPSILON_DECAY;
+    if (this.epsilon < 0.01) this.epsilon = 0.01;
+    if (this.epsilon > 1.0) this.epsilon = 1.0;
+    // console.log(`📉 Epsilon: ${oldEps.toFixed(6)} → ${this.epsilon.toFixed(6)}`);
+  }
   toJSON() { return JSON.stringify(this.qTable); }
   fromJSON(json) { try { this.qTable = JSON.parse(json); } catch (e) { this.qTable = {}; } }
   cleanup() { const threshold = 0.05; const keys = Object.keys(this.qTable); let removed = 0; for (let key of keys) { if (Math.abs(this.qTable[key]) < threshold) { delete this.qTable[key]; removed++; } } return removed; }
@@ -339,7 +345,7 @@ app.post('/api/train/start', async (req, res) => {
         
         await savePartyToSupabase(newEntry);
         
-        if (ep % 10 === 0) {
+        if (ep % 5 === 0) {
           console.log(`📊 Partie ${ep}: Epsilon=${ai1.epsilon.toFixed(6)}, States=${Object.keys(ai1.qTable).length}`);
         }
         
