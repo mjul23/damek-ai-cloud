@@ -115,28 +115,45 @@ async function savePartyToSupabase(party) {
   }
 }
 
-// 🆕 CHARGER LES MODÈLES DEPUIS SUPABASE
-async function loadModelsFromSupabase() {
+// 🆕 CHARGER EPSILON DEPUIS SUPABASE
+async function loadEpsilonFromSupabase() {
   try {
     const { data, error } = await supabase
       .from('models')
-      .select('*')
+      .select('epsilon')
       .eq('id', 1)
       .single();
 
     if (error || !data) {
-      console.log(`📂 Pas de modèles sauvegardés - Démarrage fresh`);
-      return { ai1: null, ai2: null };
+      console.log(`📂 Pas d'epsilon sauvegardé - Démarrage à 1.0`);
+      return 1.0;
     }
 
-    console.log(`✅ Modèles chargés depuis Supabase`);
-    return {
-      ai1: data.ai1_model,
-      ai2: data.ai2_model
-    };
+    console.log(`✅ Epsilon chargé depuis Supabase: ${data.epsilon.toFixed(6)}`);
+    return data.epsilon || 1.0;
   } catch (e) {
-    console.error(`⚠️ Erreur chargement modèles:`, e.message);
-    return { ai1: null, ai2: null };
+    console.error(`⚠️ Erreur chargement epsilon:`, e.message);
+    return 1.0;
+  }
+}
+
+// 🆕 SAUVEGARDER EPSILON DANS SUPABASE
+async function saveEpsilonToSupabase(epsilon) {
+  try {
+    const { data, error } = await supabase
+      .from('models')
+      .update({ epsilon: epsilon })
+      .eq('id', 1);
+
+    if (error) {
+      console.error(`❌ Erreur save epsilon:`, error.message);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error(`🚨 Erreur save epsilon:`, e.message);
+    return false;
   }
 }
 
@@ -180,6 +197,15 @@ loadHistoryFromSupabase().then(loaded => {
   console.log(`✅ Initialisation Supabase: ${loaded} parties chargées`);
 }).catch(e => {
   console.error(`❌ Erreur initialisation historique:`, e.message);
+});
+
+// Charger epsilon depuis Supabase
+loadEpsilonFromSupabase().then(epsilon => {
+  ai1.epsilon = epsilon;
+  ai2.epsilon = epsilon;
+  console.log(`✅ Epsilon chargé: ${epsilon.toFixed(6)}`);
+}).catch(e => {
+  console.error(`⚠️ Erreur epsilon:`, e.message);
 });
 
 let trainingInProgress = false;
@@ -311,10 +337,11 @@ app.post('/api/train/start', async (req, res) => {
             fs.writeFileSync('ai1.json', ai1.toJSON());
             fs.writeFileSync('ai2.json', ai2.toJSON());
             
-            // 🆕 SAUVEGARDER AUSSI DANS SUPABASE
+            // 🆕 SAUVEGARDER AUSSI DANS SUPABASE + EPSILON
             await saveModelsToSupabase(ai1, ai2);
+            await saveEpsilonToSupabase(ai1.epsilon);
             
-            console.log(`✅ Checkpoint: ${ep}/${trainingStatus.totalEpisodes} | Epsilon: ${ai1.epsilon.toFixed(4)}`);
+            console.log(`✅ Checkpoint: ${ep}/${trainingStatus.totalEpisodes} | Epsilon: ${ai1.epsilon.toFixed(6)} | States: ${Object.keys(ai1.qTable).length}`);
           } catch (e) { console.error('Save error:', e); }
         }
 
@@ -330,8 +357,9 @@ app.post('/api/train/start', async (req, res) => {
         fs.writeFileSync('ai1.json', ai1.toJSON());
         fs.writeFileSync('ai2.json', ai2.toJSON());
         
-        // 🆕 SAUVEGARDER DANS SUPABASE À LA FIN
+        // 🆕 SAUVEGARDER DANS SUPABASE À LA FIN + EPSILON
         await saveModelsToSupabase(ai1, ai2);
+        await saveEpsilonToSupabase(ai1.epsilon);
       } catch (e) { console.error('Final save error:', e); }
 
       trainingStatus.running = false;
