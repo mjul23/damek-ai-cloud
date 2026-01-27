@@ -301,6 +301,7 @@ loadModelsFromSupabase().then(models => {
 loadEpsilonFromSupabase().then(epsilon => {
   ai1.epsilon = epsilon;
   ai2.epsilon = epsilon;
+  trainingStatus.epsilon = epsilon;  // 🆕 AJOUTER ICI!
   console.log(`✅ Epsilon chargé: ${epsilon.toFixed(6)}`);
 }).catch(e => {
   console.error(`⚠️ Erreur epsilon:`, e.message);
@@ -327,7 +328,9 @@ app.post('/api/train/start', async (req, res) => {
     try {
       for (let ep = startingEpisode; ep <= trainingStatus.totalEpisodes; ep++) {
         const result = await playGame(ai1, ai2, 5000);
-        trainingStatus.episode = ep; trainingStatus.states = Object.keys(ai1.qTable).length; trainingStatus.epsilon = ai1.epsilon;
+        trainingStatus.episode = ep; 
+        trainingStatus.states = Object.keys(ai1.qTable).length; 
+        trainingStatus.epsilon = ai1.epsilon;  // 🆕 AJOUTER ICI!
         trainingStatus.epsilonHistory.push({ episode: ep, epsilon: ai1.epsilon });
         
         const newEntry = { episode: ep, winner: result.winner, ai_score: result.wins[0], opp_score: result.wins[1], epsilon: ai1.epsilon.toFixed(6), ai_states: trainingStatus.states };
