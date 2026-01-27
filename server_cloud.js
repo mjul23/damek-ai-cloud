@@ -357,11 +357,14 @@ app.get('/api/supabase/history', async (req, res) => {
       .order('episode', { ascending: true });
     
     if (error) {
+      console.error(`❌ Erreur fetch history:`, error.message);
       return res.json([]);
     }
     
+    console.log(`✅ Supabase history: ${data ? data.length : 0} parties`);
     res.json(data || []);
   } catch (e) {
+    console.error(`🚨 Erreur:`, e.message);
     res.json([]);
   }
 });
