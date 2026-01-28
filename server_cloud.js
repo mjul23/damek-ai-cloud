@@ -307,7 +307,7 @@ function playGame(ai1, ai2, timeout = 5000) {
           let reward = 1; 
           if (result.captured) { 
             if (result.captured.spy) { 
-              reward = 500; 
+              reward = 5000; 
               wins[turn]++; 
               ai.learn(stateBefore, move, reward, ai.getBoardHash(board)); 
               
@@ -320,7 +320,7 @@ function playGame(ai1, ai2, timeout = 5000) {
               resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins }); 
               return; 
             } else { 
-              reward = 50; 
+              reward = 200; 
             } 
           } 
           const stateAfter = ai.getBoardHash(board); 
