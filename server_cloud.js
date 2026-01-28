@@ -29,9 +29,9 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 const TYPES = ['PION', 'CAVALIER', 'FOU', 'TOUR', 'ROI', 'DAME'];
-const LEARNING_RATE = 0.1;
+const LEARNING_RATE = 0.25;
 const EPSILON_DECAY = 0.995;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
-const GAMMA = 0.99;
+const GAMMA = 0.9;
 
 const MAX_BUFFER = 2000;
 const CLEANUP_INTERVAL = 10;
