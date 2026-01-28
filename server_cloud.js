@@ -31,7 +31,7 @@ app.use(express.json({ limit: '10mb' }));
 const TYPES = ['PION', 'CAVALIER', 'FOU', 'TOUR', 'ROI', 'DAME'];
 const LEARNING_RATE = 0.25;
 const EPSILON_DECAY = 0.995;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
-const GAMMA = 0.9;
+const GAMMA = 0.99;
 
 const MAX_BUFFER = 2000;
 const CLEANUP_INTERVAL = 10;
@@ -307,7 +307,7 @@ function playGame(ai1, ai2, timeout = 5000) {
           let reward = 1; 
           if (result.captured) { 
             if (result.captured.spy) { 
-              reward = 5000; 
+              reward = 500; 
               wins[turn]++; 
               ai.learn(stateBefore, move, reward, ai.getBoardHash(board)); 
               
@@ -320,7 +320,7 @@ function playGame(ai1, ai2, timeout = 5000) {
               resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins }); 
               return; 
             } else { 
-              reward = 200; 
+              reward = 50; 
             } 
           } 
           const stateAfter = ai.getBoardHash(board); 
