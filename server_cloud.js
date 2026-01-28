@@ -406,6 +406,8 @@ app.post('/api/train/start', async (req, res) => {
   const lastEpisode = await loadLastEpisodeFromSupabase();
   const startingEpisode = lastEpisode + 1;  // ← Continuer depuis le dernier!
   
+  console.log(`🔴 DEBUG TRAIN START: lastEpisode=${lastEpisode}, startingEpisode=${startingEpisode}, totalEpisodesSoFar=${trainingStatus.totalEpisodesSoFar}`);
+  
   trainingStatus = { running: true, episode: startingEpisode, totalEpisodes: startingEpisode + episodes - 1, winRate: 0, states: Object.keys(ai1.qTable).length, epsilon: ai1.epsilon, startTime: Date.now(), history: trainingStatus.history, replayStats: { replays: 0, avgGain: 0 }, totalEpisodesSoFar: lastEpisode, epsilonHistory: [], lastHeartbeat: trainingStatus.lastHeartbeat, dbStatus: trainingStatus.dbStatus };
   res.json({ status: 'Entraînement lancé', episodes, startFrom: startingEpisode });
 
