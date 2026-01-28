@@ -274,7 +274,7 @@ class DamekAI {
   decayEpsilon() { 
     const oldEps = this.epsilon;
     this.epsilon *= EPSILON_DECAY;
-    if (this.epsilon < 0.01) this.epsilon = 0.01;
+    if (this.epsilon < 0.001) this.epsilon = 0.001;  // 🆕 CHANGÉ DE 0.01 À 0.001
     if (this.epsilon > 1.0) this.epsilon = 1.0;
     console.log(`🔴 DEBUG DECAY: ${oldEps.toFixed(8)} × ${EPSILON_DECAY} = ${this.epsilon.toFixed(8)}`);
   }
