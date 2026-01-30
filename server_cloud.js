@@ -30,7 +30,7 @@ app.use(express.json({ limit: '10mb' }));
 
 const TYPES = ['PION', 'CAVALIER', 'FOU', 'TOUR', 'ROI', 'DAME'];
 const LEARNING_RATE = 0.25;
-const EPSILON_DECAY = 0.999;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
+const EPSILON_DECAY = 0.9995;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
 const GAMMA = 0.99;
 
 const MAX_BUFFER = 500;  // 🆕 CHANGÉ DE 2000 À 500 (oublier les vieux coups)
