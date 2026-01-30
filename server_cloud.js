@@ -33,7 +33,7 @@ const LEARNING_RATE = 0.25;
 const EPSILON_DECAY = 0.995;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
 const GAMMA = 0.99;
 
-const MAX_BUFFER = 2000;
+const MAX_BUFFER = 500;  // 🆕 CHANGÉ DE 2000 À 500 (oublier les vieux coups)
 const CLEANUP_INTERVAL = 10;
 const MAX_HISTORY = 200;
 const HEARTBEAT_INTERVAL = 14 * 60 * 1000;
@@ -56,8 +56,34 @@ let trainingStatus = {
 
 // ===== FONCTIONS SUPABASE =====
 
-// 🆕 CHARGER LE DERNIER EPISODE DEPUIS SUPABASE
-async function loadLastEpisodeFromSupabase() {
+// 🆕 SAUVEGARDER LES TRAJECTOIRES GAGNANTES
+async function saveWinningTrajectory(episode, winner, stateHistory, moveHistory) {
+  try {
+    const movesJson = JSON.stringify(moveHistory);
+    const statesJson = JSON.stringify(stateHistory);
+    
+    const { data, error } = await supabase
+      .from('winning_trajectories')
+      .insert([{
+        episode: episode,
+        winner: winner,
+        states_count: stateHistory.length,
+        moves_json: movesJson,
+        states_json: statesJson
+      }]);
+    
+    if (error) {
+      console.error(`❌ Erreur save trajectory:`, error.message);
+      return false;
+    }
+    
+    console.log(`✅ Trajectoire gagnante sauvegardée: Episode ${episode}`);
+    return true;
+  } catch (e) {
+    console.error(`🚨 Erreur:`, e.message);
+    return false;
+  }
+}
   try {
     const { data, error } = await supabase
       .from('history')
