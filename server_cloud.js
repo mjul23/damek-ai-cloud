@@ -84,6 +84,9 @@ async function saveWinningTrajectory(episode, winner, stateHistory, moveHistory)
     return false;
   }
 }
+
+// 🆕 CHARGER LE DERNIER EPISODE DEPUIS SUPABASE
+async function loadLastEpisodeFromSupabase() {
   try {
     const { data, error } = await supabase
       .from('history')
