@@ -112,7 +112,6 @@ class DamekAI {
 let ai1 = new DamekAI(0);
 let ai2 = new DamekAI(1);
 
-// Charger les modèles
 loadModelsFromSupabase().then(models => {
   if (models.ai1) ai1.fromJSON(models.ai1);
   if (models.ai2) ai2.fromJSON(models.ai2);
@@ -212,7 +211,7 @@ app.post('/api/train/replay', async (req, res) => {
       }
 
       trainingStatus.running = false;
-      console.log(`✅ Replay terminé! ${episodes} parties avec ${Object.keys(ai1.qTable).length} états`);
+      console.log(`✅ Replay terminé! ${episodes} parties`);
     } catch (e) {
       console.error('Replay error:', e);
       trainingStatus.running = false;
@@ -231,20 +230,21 @@ app.get('/api/moves/analysis', async (req, res) => {
     const analysis = {
       totalMoves: data.length,
       gameResults: { ai1Wins: 0, ai2Wins: 0 },
-      topWinningMoves: [],
-      rewardStats: {}
+      topWinningMoves: []
     };
 
     data.forEach(move => {
       if (move.game_result === 0) analysis.gameResults.ai1Wins++;
       else analysis.gameResults.ai2Wins++;
 
-      const key = `${move.from_r}-${move.from_c}→${move.to_r}-${move.to_c}`;
-      const existing = analysis.topWinningMoves.find(m => m.move === key);
-      if (existing && move.game_result === 0) {
-        existing.count++;
-      } else if (move.game_result === 0) {
-        analysis.topWinningMoves.push({ move: key, count: 1, reward: move.reward });
+      if (move.game_result === 0 && move.player === 0) {
+        const key = move.from_r + '-' + move.from_c + '→' + move.to_r + '-' + move.to_c;
+        const existing = analysis.topWinningMoves.find(m => m.move === key);
+        if (existing) {
+          existing.count++;
+        } else {
+          analysis.topWinningMoves.push({ move: key, count: 1, reward: move.reward });
+        }
       }
     });
 
@@ -256,7 +256,8 @@ app.get('/api/moves/analysis', async (req, res) => {
 });
 
 app.get('/patterns', (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Patterns</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:1200px;margin:0 auto}h1{color:#4cc9f0;text-align:center}button{padding:10px;background:#4cc9f0;color:#000;border:none;border-radius:4px;cursor:pointer;margin:10px}.stats{background:#0f3460;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #4cc9f0}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{padding:10px;text-align:left;border-bottom:1px solid #4cc9f0}th{background:#1a5f7a}</style></head><body><div class="container"><h1>🎯 Patterns Gagnants</h1><button onclick="launchReplay()">🎮 Lancer Replay (1000)</button><button onclick="loadAnalysis()">📊 Charger Analysis</button><div class="stats"><div>Total Moves: <strong id="tm">-</strong></div><div>AI1 Wins: <strong id="w1">-</strong></div><div>AI2 Wins: <strong id="w2">-</strong></div></div><h2>Top Moves</h2><div id="moves"></div></div><script>async function launchReplay(){if(!confirm('Lancer 1000 parties?')) return;const r=await fetch('/api/train/replay',{method:'POST',body:JSON.stringify({episodes:1000}),headers:{'Content-Type':'application/json'}});alert('Replay lancé!');setInterval(loadAnalysis,5000)}async function loadAnalysis(){const r=await fetch('/api/moves/analysis'),a=await r.json();document.getElementById('tm').textContent=a.totalMoves;document.getElementById('w1').textContent=a.gameResults.ai1Wins;document.getElementById('w2').textContent=a.gameResults.ai2Wins;let html='<table><tr><th>Rank</th><th>Move</th><th>Count</th></tr>';a.topWinningMoves.forEach((m,i)=>{html+=`<tr><td>${i+1}</td><td>${m.move}</td><td>${m.count}</td></tr>`});html+='</table>';document.getElementById('moves').innerHTML=html}loadAnalysis();setInterval(loadAnalysis,10000)</script></body></html>`);
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Patterns</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:1200px;margin:0 auto}h1{color:#4cc9f0;text-align:center}button{padding:10px;background:#4cc9f0;color:#000;border:none;border-radius:4px;cursor:pointer;margin:10px}.stats{background:#0f3460;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #4cc9f0}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{padding:10px;text-align:left;border-bottom:1px solid #4cc9f0}th{background:#1a5f7a}</style></head><body><div class="container"><h1>🎯 Patterns Gagnants</h1><button onclick="launchReplay()">🎮 Lancer Replay</button><button onclick="loadAnalysis()">📊 Charger</button><div class="stats"><div>Moves: <strong id="tm">-</strong></div><div>AI1 Wins: <strong id="w1">-</strong></div><div>AI2 Wins: <strong id="w2">-</strong></div></div><h2>Top Moves</h2><div id="moves"></div></div><script>async function launchReplay(){if(!confirm("Lancer 1000 parties?")) return;await fetch("/api/train/replay",{method:"POST",body:JSON.stringify({episodes:1000}),headers:{"Content-Type":"application/json"}});alert("Replay lancé!");setInterval(loadAnalysis,5000)}async function loadAnalysis(){const r=await fetch("/api/moves/analysis"),a=await r.json();document.getElementById("tm").textContent=a.totalMoves;document.getElementById("w1").textContent=a.gameResults.ai1Wins;document.getElementById("w2").textContent=a.gameResults.ai2Wins;let html="<table><tr><th>Rank</th><th>Move</th><th>Count</th></tr>";a.topWinningMoves.forEach((m,i)=>{html+="<tr><td>"+(i+1)+"</td><td>"+m.move+"</td><td>"+m.count+"</td></tr>"});html+="</table>";document.getElementById("moves").innerHTML=html}loadAnalysis();setInterval(loadAnalysis,10000)</script></body></html>';
+  res.send(html);
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Serveur REPLAY sur port ${PORT}`));
