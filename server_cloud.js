@@ -56,53 +56,37 @@ let trainingStatus = {
 
 // ===== FONCTIONS SUPABASE =====
 
-// 🆕 SAUVEGARDER LES TRAJECTOIRES GAGNANTES
-async function saveWinningTrajectory(episode, winner, stateHistory, moveHistory) {
+// 🆕 SAUVEGARDER UN MOVE DANS SUPABASE
+async function saveMoveToSupabase(episode, moveNumber, player, fromPos, toPos, isCapture, reward, gameResult, epsilon, aiStates) {
   try {
-    const movesJson = JSON.stringify(moveHistory);
-    const statesJson = JSON.stringify(stateHistory);
-    
     const { data, error } = await supabase
-      .from('winning_trajectories')
+      .from('moves')
       .insert([{
         episode: episode,
-        winner: winner,
-        states_count: stateHistory.length,
-        moves_json: movesJson,
-        states_json: statesJson
+        move_number: moveNumber,
+        player: player,
+        from_r: fromPos[0],
+        from_c: fromPos[1],
+        to_r: toPos[0],
+        to_c: toPos[1],
+        is_capture: isCapture,
+        reward: parseFloat(reward),
+        game_result: gameResult,
+        epsilon: parseFloat(epsilon),
+        ai_states: aiStates
       }]);
     
     if (error) {
-      console.error(`❌ Erreur save trajectory:`, error.message);
+      console.error(`❌ Erreur save move:`, error.message);
       return false;
     }
     
-    console.log(`✅ Trajectoire gagnante sauvegardée: Episode ${episode}`);
     return true;
   } catch (e) {
-    console.error(`🚨 Erreur:`, e.message);
+    console.error(`🚨 Erreur save move:`, e.message);
     return false;
   }
 }
-  try {
-    const { data, error } = await supabase
-      .from('history')
-      .select('episode')
-      .order('episode', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (error || !data) {
-      console.log(`📂 Aucun episode trouvé - Démarrage à 0`);
-      return 0;
-    }
-
-    console.log(`✅ Dernier episode: ${data.episode}`);
-    return data.episode;
-  } catch (e) {
-    console.error(`⚠️ Erreur chargement episode:`, e.message);
-    return 0;
-  }
 }
 
 // 🆕 CHARGER L'HISTORIQUE DEPUIS SUPABASE
