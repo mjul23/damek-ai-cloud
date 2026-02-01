@@ -30,10 +30,10 @@ app.use(express.json({ limit: '10mb' }));
 
 const TYPES = ['PION', 'CAVALIER', 'FOU', 'TOUR', 'ROI', 'DAME'];
 const LEARNING_RATE = 0.25;
-const EPSILON_DECAY = 0.99976;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
+const EPSILON_DECAY = 0.995;  // 🆕 CHANGÉ DE 0.9985 À 0.995 (plus rapide!)
 const GAMMA = 0.99;
 
-const MAX_BUFFER = 500;  // 🆕 CHANGÉ DE 2000 À 500 (oublier les vieux coups)
+const MAX_BUFFER = 2000;
 const CLEANUP_INTERVAL = 10;
 const MAX_HISTORY = 200;
 const HEARTBEAT_INTERVAL = 14 * 60 * 1000;
@@ -84,9 +84,6 @@ async function saveWinningTrajectory(episode, winner, stateHistory, moveHistory)
     return false;
   }
 }
-
-// 🆕 CHARGER LE DERNIER EPISODE DEPUIS SUPABASE
-async function loadLastEpisodeFromSupabase() {
   try {
     const { data, error } = await supabase
       .from('history')
@@ -312,6 +309,119 @@ class DamekAI {
   cleanup() { const threshold = 0.05; const keys = Object.keys(this.qTable); let removed = 0; for (let key of keys) { if (Math.abs(this.qTable[key]) < threshold) { delete this.qTable[key]; removed++; } } return removed; }
 }
 
+// 🆕 SAUVEGARDER UN MOVE DANS SUPABASE
+async function saveMoveToSupabase(episode, moveNumber, player, fromPos, toPos, isCapture, reward, gameResult, epsilon, aiStates) {
+  try {
+    const { data, error } = await supabase
+      .from('moves')
+      .insert([{
+        episode: episode,
+        move_number: moveNumber,
+        player: player,
+        from_r: fromPos[0],
+        from_c: fromPos[1],
+        to_r: toPos[0],
+        to_c: toPos[1],
+        is_capture: isCapture,
+        reward: parseFloat(reward),
+        game_result: gameResult,
+        epsilon: parseFloat(epsilon),
+        ai_states: aiStates
+      }]);
+    
+    if (error) {
+      console.error(`❌ Erreur save move:`, error.message);
+      return false;
+    }
+    
+    return true;
+  } catch (e) {
+    console.error(`🚨 Erreur save move:`, e.message);
+    return false;
+  }
+}
+
+function playGameWithMoves(ai1, ai2, episode, recordMoves = false, timeout = 5000) {
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => {
+      ai1.decayEpsilon();
+      ai2.decayEpsilon();
+      resolve({ winner: 0, wins: [0, 0], movesRecorded: 0 });
+    }, timeout);
+    try {
+      let board = createBoard(); 
+      let turn = 0; 
+      let roundNum = 0; 
+      let wins = [0, 0];
+      let movesRecorded = 0;
+      let moveNumber = 0;
+      
+      while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) { 
+        roundNum++; 
+        turn = 0;
+        while (turn < 100) { 
+          const dice = TYPES[Math.floor(Math.random() * 6)]; 
+          const ai = turn === 0 ? ai1 : ai2; 
+          const moves = getAllMoves(turn, dice, board); 
+          if (!moves.length) break; 
+          const stateBefore = ai.getBoardHash(board); 
+          const move = ai.chooseAction(board, moves); 
+          if (!move) break; 
+          const result = executeMove(board, move.from, move.to); 
+          board = result.board; 
+          let reward = 1; 
+          moveNumber++;
+          
+          if (result.captured) { 
+            if (result.captured.spy) { 
+              reward = 5000; 
+              wins[turn]++; 
+              ai.learn(stateBefore, move, reward, ai.getBoardHash(board)); 
+              
+              // 🆕 Enregistrer le dernier move
+              if (recordMoves) {
+                saveMoveToSupabase(episode, moveNumber, turn, move.from, move.to, true, reward, wins[0] >= wins[1] ? 0 : 1, ai1.epsilon, Object.keys(ai1.qTable).length).then(() => {
+                  movesRecorded++;
+                });
+              }
+              
+              ai1.decayEpsilon();
+              ai2.decayEpsilon();
+              clearTimeout(timeoutId); 
+              resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins, movesRecorded }); 
+              return; 
+            } else { 
+              reward = 200; 
+            } 
+          } 
+          const stateAfter = ai.getBoardHash(board); 
+          ai.learn(stateBefore, move, reward, stateAfter); 
+          
+          // 🆕 Enregistrer chaque move
+          if (recordMoves) {
+            saveMoveToSupabase(episode, moveNumber, turn, move.from, move.to, result.captured ? true : false, reward, wins[0] >= wins[1] ? 0 : 1, ai1.epsilon, Object.keys(ai1.qTable).length).then(() => {
+              movesRecorded++;
+            });
+          }
+          
+          turn = 1 - turn; 
+        } 
+      }
+      
+      ai1.decayEpsilon(); 
+      ai2.decayEpsilon();
+      clearTimeout(timeoutId); 
+      resolve({ winner: wins[0] >= wins[1] ? 0 : 1, wins, movesRecorded });
+    } catch (e) { 
+      console.error('Game error:', e); 
+      ai1.decayEpsilon();
+      ai2.decayEpsilon();
+      clearTimeout(timeoutId); 
+      resolve({ winner: 0, wins: [0, 0], movesRecorded: 0 }); 
+    }
+  });
+}
+
 function playGame(ai1, ai2, timeout = 5000) {
   return new Promise((resolve) => {
     const timeoutId = setTimeout(() => {
@@ -426,7 +536,57 @@ function startHeartbeat() {
   console.log(`⏰ Heartbeat lancé`);
 }
 
-app.post('/api/train/start', async (req, res) => {
+app.post('/api/train/replay', async (req, res) => {
+  const { episodes = 1000 } = req.body;
+  if (trainingInProgress) { return res.json({ error: 'Entraînement déjà en cours' }); }
+  trainingInProgress = true;
+  
+  const startingEpisode = 1;
+  trainingStatus = { running: true, episode: startingEpisode, totalEpisodes: startingEpisode + episodes - 1, winRate: 0, states: Object.keys(ai1.qTable).length, epsilon: 0, startTime: Date.now(), history: [], replayStats: { replays: 0, avgGain: 0 }, totalEpisodesSoFar: 0, epsilonHistory: [], lastHeartbeat: trainingStatus.lastHeartbeat, dbStatus: 'REPLAY MODE - epsilon=0' };
+  res.json({ status: 'Replay lancé (epsilon=0)', episodes, startFrom: startingEpisode });
+
+  (async () => {
+    try {
+      for (let ep = startingEpisode; ep <= trainingStatus.totalEpisodes; ep++) {
+        // 🆕 MODE REPLAY: epsilon=0 (100% exploitation)
+        ai1.epsilon = 0;
+        ai2.epsilon = 0;
+        
+        const result = await playGameWithMoves(ai1, ai2, ep, true, 5000);
+        trainingStatus.episode = ep; 
+        trainingStatus.states = Object.keys(ai1.qTable).length; 
+        trainingStatus.epsilon = 0;
+        
+        const newEntry = { episode: ep, winner: result.winner, ai_score: result.wins[0], opp_score: result.wins[1], epsilon: 0, ai_states: trainingStatus.states };
+        trainingStatus.history.push(newEntry);
+        if (trainingStatus.history.length > MAX_HISTORY) { trainingStatus.history.shift(); }
+        
+        await savePartyToSupabase(newEntry);
+        
+        if (ep % 10 === 0) {
+          console.log(`🎯 Replay ${ep}/${trainingStatus.totalEpisodes}: Moves=${result.movesRecorded}, Winner=${result.winner}, Win rate=${trainingStatus.winRate}%`);
+        }
+        
+        const wins = trainingStatus.history.filter(h => h.winner === 0).length; 
+        trainingStatus.winRate = (wins / trainingStatus.history.length * 100).toFixed(1);
+
+        if ((ep - startingEpisode) % Math.max(100, Math.floor(trainingStatus.totalEpisodes - startingEpisode + 1) / 10) === 0) {
+          console.log(`✅ Replay checkpoint: ${ep}/${trainingStatus.totalEpisodes} | Win rate: ${trainingStatus.winRate}%`);
+        }
+
+        await new Promise(resolve => setImmediate(resolve));
+      }
+
+      trainingStatus.running = false;
+      console.log(`✅ Replay terminé! ${trainingStatus.totalEpisodes} parties avec moves enregistrés!`);
+    } catch (e) { 
+      console.error('Replay error:', e); 
+      trainingStatus.running = false; 
+    } finally { 
+      trainingInProgress = false; 
+    }
+  })();
+});
   const { episodes = 1000 } = req.body;
   if (trainingInProgress) { return res.json({ error: 'Entraînement déjà en cours' }); }
   trainingInProgress = true;
@@ -570,7 +730,69 @@ app.get('/api/supabase/history', async (req, res) => {
   }
 });
 
-app.get('/api/stats', (req, res) => {
+app.get('/api/moves/analysis', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('moves')
+      .select('*')
+      .order('episode', { ascending: true });
+    
+    if (error) {
+      console.error(`❌ Erreur analysis:`, error.message);
+      return res.json({ error: error.message });
+    }
+
+    // Analyser les patterns
+    const analysis = {
+      totalMoves: data.length,
+      movesByPlayer: { 0: 0, 1: 0 },
+      capturesByPlayer: { 0: 0, 1: 0 },
+      winRateByReward: {},
+      topWinningMoves: [],
+      averageMovesPerGame: 0,
+      gameResults: { ai1Wins: 0, ai2Wins: 0 },
+      movePositions: []
+    };
+
+    // Compter moves par player
+    data.forEach(move => {
+      analysis.movesByPlayer[move.player]++;
+      if (move.is_capture) analysis.capturesByPlayer[move.player]++;
+      
+      const rewardKey = `reward_${Math.round(move.reward)}`;
+      if (!analysis.winRateByReward[rewardKey]) {
+        analysis.winRateByReward[rewardKey] = { wins: 0, total: 0 };
+      }
+      analysis.winRateByReward[rewardKey].total++;
+      if (move.game_result === 0) analysis.winRateByReward[rewardKey].wins++;
+      
+      if (move.game_result === 0) analysis.gameResults.ai1Wins++;
+      else analysis.gameResults.ai2Wins++;
+      
+      // Position des moves gagnants
+      if (move.game_result === 0 && move.player === 0) {
+        const key = `${move.from_r}-${move.from_c}→${move.to_r}-${move.to_c}`;
+        const existing = analysis.topWinningMoves.find(m => m.move === key);
+        if (existing) {
+          existing.count++;
+        } else {
+          analysis.topWinningMoves.push({ move: key, count: 1, reward: move.reward });
+        }
+      }
+    });
+
+    // Trier les moves
+    analysis.topWinningMoves.sort((a, b) => b.count - a.count);
+    analysis.topWinningMoves = analysis.topWinningMoves.slice(0, 50);
+    
+    analysis.averageMovesPerGame = Math.round(data.length / analysis.gameResults.ai1Wins + analysis.gameResults.ai2Wins);
+
+    res.json(analysis);
+  } catch (e) {
+    console.error(`🚨 Erreur:`, e.message);
+    res.json({ error: e.message });
+  }
+});
   res.json({ ai1_states: Object.keys(ai1.qTable).length, ai2_states: Object.keys(ai2.qTable).length, total_actions: Object.keys(ai1.qTable).length + Object.keys(ai2.qTable).length, epsilon: ai1.epsilon.toFixed(6), training: trainingStatus.running, memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB', port: PORT, replays: trainingStatus.replayStats.replays, replayGain: trainingStatus.replayStats.avgGain.toFixed(6), totalEpisodes: trainingStatus.totalEpisodesSoFar, lastHeartbeat: trainingStatus.lastHeartbeat, dbStatus: trainingStatus.dbStatus, config: { gamma: GAMMA, alpha: LEARNING_RATE, epsilonDecay: EPSILON_DECAY } });
 });
 
@@ -578,7 +800,10 @@ app.get('/analyse', (req, res) => {
   res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Analyse</title><script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:1200px;margin:0 auto}h1{text-align:center;color:#4cc9f0;margin-bottom:30px}.info-bar{background:#1a3a3a;padding:15px;border-radius:4px;margin:15px 0;border-left:3px solid #77dd77;color:#aaa;font-size:0.9em;text-align:center}.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin-bottom:30px}.stat-card{background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0;text-align:center}.stat-value{font-size:2.5em;font-weight:bold;color:#4cc9f0}.stat-label{color:#aaa;font-size:0.9em;margin-top:10px}.db-status{background:#0f3460;padding:15px;margin:20px 0;border-radius:8px;border:1px solid #77dd77;color:#77dd77;font-size:0.9em}.charts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:20px}.chart-container{background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0;height:350px;position:relative}.chart-title{color:#4cc9f0;margin-bottom:15px;font-weight:bold}canvas{max-height:300px}</style></head><body><div class="container"><h1>📊 Analyse Damek</h1><div class="info-bar">✅ AVEC SUPABASE 🗄️ Données PERSISTANTES 100% 📊 Total: <strong id="total">-</strong></div><div id="stats" class="stats-grid"></div><div id="db" class="db-status"></div><div class="charts-grid"><div class="chart-container"><div class="chart-title">Victoires</div><canvas id="c1"></canvas></div><div class="chart-container"><div class="chart-title">États</div><canvas id="c2"></canvas></div><div class="chart-container"><div class="chart-title">Epsilon</div><canvas id="c3"></canvas></div><div class="chart-container"><div class="chart-title">Répartition</div><canvas id="c4"></canvas></div></div></div><script>let charts={};async function load(){try{const s=await fetch('/api/train/status'),st=await s.json(),h=await fetch('/api/supabase/history'),hl=await h.json(),c=await fetch('/api/supabase/count'),ct=await c.json(),a=await fetch('/api/stats'),ap=await a.json();document.getElementById('total').textContent=ct.count||hl.length||0;document.getElementById('stats').innerHTML='<div class="stat-card"><div class="stat-value">'+(hl.length>0?((hl.filter(x=>x.winner===0).length/hl.length*100).toFixed(1)):'0')+'%</div><div class="stat-label">Victoires</div></div><div class="stat-card"><div class="stat-value">'+(hl.length||0)+'</div><div class="stat-label">Parties</div></div><div class="stat-card"><div class="stat-value">'+ap.ai1_states.toLocaleString()+'</div><div class="stat-label">États</div></div><div class="stat-card"><div class="stat-value">'+ap.epsilon+'</div><div class="stat-label">Epsilon</div></div>';document.getElementById('db').textContent='🗄️ Supabase: '+ap.dbStatus;if(!hl||hl.length<1)return;const ep=hl.map(x=>x.episode),v=[],st2=[],p=[];let w=0;hl.forEach(x=>{if(x.winner===0)w++;v.push((w/hl.length*100).toFixed(1));st2.push(x.ai_states);p.push(parseFloat(x.epsilon))});const tw=hl.filter(x=>x.winner===0).length,tl=hl.length-tw;mk('c1',ep,v,'#4cc9f0');mk('c2',ep,st2,'#f72585');const epe=hl.map(x=>x.episode),epv=hl.map(x=>parseFloat(x.epsilon));mk('c3',epe,epv,'#77dd77');mk('c4',[tw,tl],['#4cc9f0','#f72585'],'pie')}catch(e){console.error(e)}}function mk(i,x,y,c,t){const a=document.getElementById(i);if(!a)return;if(charts[i])charts[i].destroy();const ctx=a.getContext('2d');const isp='c4'===i;charts[i]=new Chart(ctx,{type:isp?'doughnut':'line',data:{labels:x,datasets:[{label:t||'',data:y,borderColor:c,backgroundColor:isp?c:'rgba(0,0,0,0.1)',borderWidth:2,fill:!isp,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#fff'}}},scales:{y:{ticks:{color:'#fff'},grid:{color:'rgba(255,255,255,0.1)'}},x:{ticks:{color:'#fff'},grid:{color:'rgba(255,255,255,0.1)'}}}}});}load();setInterval(load,5000);</script></body></html>`);
 });
 
-app.get('/', (req, res) => {
+app.get('/patterns', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Patterns Gagnants</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:1400px;margin:0 auto}h1{text-align:center;color:#4cc9f0;margin-bottom:20px}h2{color:#4cc9f0;margin-top:30px;margin-bottom:15px}.info-bar{background:#1a3a3a;padding:15px;border-radius:4px;margin:15px 0;border-left:3px solid #77dd77;color:#aaa;font-size:0.9em}.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin-bottom:30px}.stat-card{background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0;text-align:center}.stat-value{font-size:2em;font-weight:bold;color:#4cc9f0}.stat-label{color:#aaa;font-size:0.9em;margin-top:10px}.table-container{background:#0f3460;border-radius:8px;border:1px solid #4cc9f0;overflow-x:auto;margin:20px 0}table{width:100%;border-collapse:collapse}th{background:#1a5f7a;padding:10px;text-align:left;border-bottom:1px solid #4cc9f0}td{padding:10px;border-bottom:1px solid #2d3e50}tr:hover{background:#1a4d60}button{padding:10px 20px;background:#4cc9f0;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:bold;margin:10px 0}.button-group{display:flex;gap:10px;margin:20px 0}</style></head><body><div class="container"><h1>🎯 Patterns Gagnants - Damek</h1><div class="button-group"><button onclick="loadAnalysis()">📊 Charger Analysis</button><button onclick="launchReplay()">🎮 Lancer Replay (1000 parties)</button></div><div id="stats" class="stats-grid"></div><h2>📈 Win Rate par Reward</h2><div id="reward" class="table-container"><p style="padding:20px">Chargement...</p></div><h2>🏆 Top 50 Moves Gagnants</h2><div id="moves" class="table-container"><p style="padding:20px">Chargement...</p></div></div><script>async function loadAnalysis(){try{const r=await fetch('/api/moves/analysis'),a=await r.json();if(a.error){alert('Erreur: '+a.error);return}document.getElementById('stats').innerHTML='<div class="stat-card"><div class="stat-value">'+a.totalMoves+'</div><div class="stat-label">Total Moves</div></div><div class="stat-card"><div class="stat-value">'+a.gameResults.ai1Wins+'</div><div class="stat-label">AI1 Wins</div></div><div class="stat-card"><div class="stat-value">'+a.gameResults.ai2Wins+'</div><div class="stat-label">AI2 Wins</div></div><div class="stat-card"><div class="stat-value">'+a.averageMovesPerGame+'</div><div class="stat-label">Moves/Game</div></div>';let rewardHtml='<table><thead><tr><th>Reward</th><th>Total</th><th>Wins</th><th>Win Rate</th></tr></thead><tbody>';Object.entries(a.winRateByReward).forEach(([k,v])=>{const wr=(v.wins/v.total*100).toFixed(1);rewardHtml+=`<tr><td>${k}</td><td>${v.total}</td><td>${v.wins}</td><td>${wr}%</td></tr>`});rewardHtml+='</tbody></table>';document.getElementById('reward').innerHTML=rewardHtml;let movesHtml='<table><thead><tr><th>Rank</th><th>Move (from→to)</th><th>Occurrences</th><th>Reward</th></tr></thead><tbody>';a.topWinningMoves.forEach((m,i)=>{movesHtml+=`<tr><td>${i+1}</td><td>${m.move}</td><td>${m.count}</td><td>${m.reward}</td></tr>`});movesHtml+='</tbody></table>';document.getElementById('moves').innerHTML=movesHtml}catch(e){alert('Erreur: '+e.message)}}async function launchReplay(){if(!confirm('Lancer 1000 parties en mode optimal (epsilon=0)?')) return;try{const r=await fetch('/api/train/replay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episodes:1000})}),d=await r.json();alert('Replay lancé! '+d.status);setInterval(loadAnalysis,5000)}catch(e){alert('Erreur: '+e.message)}}loadAnalysis();setInterval(loadAnalysis,10000)</script></body></html>`);
+});
+
   res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>IA Damek</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px}.container{max-width:600px;margin:0 auto;background:#0f3460;padding:20px;border-radius:8px;border:1px solid #4cc9f0}h1{color:#4cc9f0;margin-bottom:20px}.info{background:#1a3a3a;padding:15px;border-radius:4px;margin:15px 0;border-left:3px solid #77dd77;color:#aaa;font-size:0.9em}input{width:100%;padding:10px;margin:10px 0;background:#1a1a2e;border:1px solid #4cc9f0;color:#fff;border-radius:4px}button{flex:1;padding:12px;background:#4cc9f0;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:bold}.buttons{display:flex;gap:10px;margin:15px 0}button:hover{background:#f72585}a{text-decoration:none}.stats{background:#1a1a2e;border:1px solid #4cc9f0;padding:15px;border-radius:4px;margin:20px 0}.stat-row{display:flex;justify-content:space-between;margin:10px 0}.stat-label{color:#aaa}.stat-value{color:#4cc9f0;font-weight:bold}.progress-bar{width:100%;height:20px;background:#1a1a2e;border-radius:10px;overflow:hidden;margin:10px 0}.progress-fill{height:100%;background:#4cc9f0;width:0%;transition:width 0.3s}.db-info{font-size:0.8em;color:#77dd77;margin-top:10px}</style></head><body><div class="container"><h1>🤖 IA Damek</h1><div class="info">✅ AVEC SUPABASE<br>🗄️ Données PERSISTANTES 100%<br>📊 Total: <strong id="tot">-</strong></div><input type="number" id="ep" value="500" min="10" max="1000"><div class="buttons"><button onclick="go()">🚀 Entraîner</button><button onclick="ref()">🔄 Refresh</button><a href="/analyse"><button>📊 Analyse</button></a></div><div class="stats"><div class="stat-row"><span class="stat-label">Partie:</span><span class="stat-value"><span id="e">-</span>/<span id="te">-</span></span></div><div class="stat-row"><span class="stat-label">Victoires:</span><span class="stat-value"><span id="w">-</span>%</span></div><div class="stat-row"><span class="stat-label">États:</span><span class="stat-value"><span id="st">-</span></span></div><div class="stat-row"><span class="stat-label">Epsilon:</span><span class="stat-value"><span id="eps">-</span></span></div><div class="progress-bar"><div class="progress-fill" id="pb"></div></div><div class="db-info">🗄️ <span id="db">-</span></div></div></div><script>async function go(){const n=parseInt(document.getElementById('ep').value);if(n<10){alert('Minimum 10 parties');return}try{const r=await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episodes:n})}),d=await r.json();if(d.error){alert('Erreur: '+d.error)}else{alert('Lancé! Démarrage: '+d.startFrom);ref()}}catch(e){alert('Erreur: '+e.message)}}async function ref(){try{const r1=await fetch('/api/train/status'),s1=await r1.json(),r2=await fetch('/api/stats'),s2=await r2.json();document.getElementById('e').textContent=s1.episode;document.getElementById('te').textContent=s1.totalEpisodes;document.getElementById('tot').textContent=s1.totalHistoryLength;document.getElementById('w').textContent=s1.winRate;document.getElementById('st').textContent=s1.states.toLocaleString();document.getElementById('eps').textContent=s2.epsilon;document.getElementById('db').textContent=s2.dbStatus;const p=s1.totalEpisodes?((s1.episode-s1.totalEpisodesSoFar)/(s1.totalEpisodes-s1.totalEpisodesSoFar+1)*100):0;document.getElementById('pb').style.width=p+'%';if(s1.running)setTimeout(ref,2000)}catch(e){console.error(e)}}ref();setInterval(ref,5000)</script></body></html>`);
 });
 
