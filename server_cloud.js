@@ -100,21 +100,52 @@ function createBoard() { const b = []; for (let r = 0; r < 8; r++) { b[r] = []; 
 function getAllMoves(player, type, board) { const all = []; for (let r = 0; r < 8; r++) { for (let c = 0; c < 8; c++) { if (board[r][c]?.p === player) { MOVES[type](r, c, player, board).forEach(m => all.push({ from: [r, c], ...m })); } } } return all; }
 function executeMove(board, from, to) { const newBoard = board.map(row => [...row]); newBoard[to[0]][to[1]] = newBoard[from[0]][from[1]]; const captured = board[to[0]][to[1]]; newBoard[from[0]][from[1]] = null; return { board: newBoard, captured }; }
 
-async function saveGameState(episode, spy1Pos, spy2Pos, pions1, pions2, winner) {
+async function saveMoveState(episode, moveNumber, turn, dice, fromPos, toPos, boardState, reward, spyPos, pionsCount, gameResult) {
   try {
-    await supabase.from('game_states').insert([{
+    await supabase.from('game_moves').insert([{
       episode,
-      spy1_r: spy1Pos[0],
-      spy1_c: spy1Pos[1],
-      spy2_r: spy2Pos[0],
-      spy2_c: spy2Pos[1],
-      pions1_count: pions1,
-      pions2_count: pions2,
-      winner
+      move_number: moveNumber,
+      player: turn,
+      dice,
+      from_r: fromPos[0],
+      from_c: fromPos[1],
+      to_r: toPos[0],
+      to_c: toPos[1],
+      board_hash: boardState,
+      reward,
+      spy1_r: spyPos[0][0],
+      spy1_c: spyPos[0][1],
+      spy2_r: spyPos[1][0],
+      spy2_c: spyPos[1][1],
+      pions1_count: pionsCount[0],
+      pions2_count: pionsCount[1],
+      game_result: gameResult
     }]);
   } catch (e) {
-    console.error('Save error:', e.message);
+    console.error('Save move error:', e.message);
   }
+}
+
+function findSpies(board) {
+  let spy1 = null, spy2 = null;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      if (board[r][c]?.spy && board[r][c].p === 0) spy1 = [r, c];
+      if (board[r][c]?.spy && board[r][c].p === 1) spy2 = [r, c];
+    }
+  }
+  return [spy1 || [0,0], spy2 || [7,7]];
+}
+
+function countPions(board) {
+  let p1 = 0, p2 = 0;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      if (board[r][c]?.p === 0 && !board[r][c].spy) p1++;
+      if (board[r][c]?.p === 1 && !board[r][c].spy) p2++;
+    }
+  }
+  return [p1, p2];
 }
 
 function playGame(ai1, ai2, episode) {
@@ -125,6 +156,7 @@ function playGame(ai1, ai2, episode) {
       let roundNum = 0;
       let wins = [0, 0];
       let moveCount = 0;
+      let gameResult = 0;
 
       while (wins[0] < 3 && wins[1] < 3 && roundNum < 50) {
         roundNum++;
@@ -141,25 +173,22 @@ function playGame(ai1, ai2, episode) {
           board = result.board;
           let reward = 1;
           moveCount++;
+          
+          // 🎯 Récupérer positions actuelles
+          const spyPos = findSpies(board);
+          const pionsCount = countPions(board);
 
           if (result.captured) {
             if (result.captured.spy) {
               reward = 5000;
               wins[turn]++;
+              gameResult = wins[0] > wins[1] ? 0 : 1;
               ai.learn(stateBefore, move, reward, ai.getBoardHash(board));
               
-              // 🎯 Sauvegarder l'état final
-              let spy1 = null, spy2 = null, p1 = 0, p2 = 0;
-              for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                  if (board[r][c]?.spy && board[r][c].p === 0) spy1 = [r, c];
-                  if (board[r][c]?.spy && board[r][c].p === 1) spy2 = [r, c];
-                  if (board[r][c]?.p === 0 && !board[r][c].spy) p1++;
-                  if (board[r][c]?.p === 1 && !board[r][c].spy) p2++;
-                }
-              }
-              saveGameState(episode, spy1 || [0,0], spy2 || [7,7], p1, p2, wins[0] > wins[1] ? 0 : 1);
-              resolve({ winner: wins[0] > wins[1] ? 0 : 1, wins, moves: moveCount });
+              // 🎯 Enregistrer ce dernier coup GAGNANT
+              saveMoveState(episode, moveCount, turn, dice, move.from, move.to, ai.getBoardHash(board), reward, spyPos, pionsCount, gameResult);
+              
+              resolve({ winner: gameResult, wins, moves: moveCount });
               return;
             } else {
               reward = 200;
@@ -168,21 +197,16 @@ function playGame(ai1, ai2, episode) {
 
           const stateAfter = ai.getBoardHash(board);
           ai.learn(stateBefore, move, reward, stateAfter);
+          
+          // 🎯 Enregistrer CHAQUE coup
+          saveMoveState(episode, moveCount, turn, dice, move.from, move.to, stateAfter, reward, spyPos, pionsCount, gameResult);
+          
           turn = 1 - turn;
         }
       }
 
-      let spy1 = null, spy2 = null, p1 = 0, p2 = 0;
-      for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-          if (board[r][c]?.spy && board[r][c].p === 0) spy1 = [r, c];
-          if (board[r][c]?.spy && board[r][c].p === 1) spy2 = [r, c];
-          if (board[r][c]?.p === 0 && !board[r][c].spy) p1++;
-          if (board[r][c]?.p === 1 && !board[r][c].spy) p2++;
-        }
-      }
-      saveGameState(episode, spy1 || [0,0], spy2 || [7,7], p1, p2, wins[0] > wins[1] ? 0 : 1);
-      resolve({ winner: wins[0] > wins[1] ? 0 : 1, wins, moves: moveCount });
+      gameResult = wins[0] > wins[1] ? 0 : 1;
+      resolve({ winner: gameResult, wins, moves: moveCount });
     } catch (e) {
       console.error('Game error:', e);
       resolve({ winner: 0, wins: [0, 0], moves: 0 });
@@ -193,7 +217,7 @@ function playGame(ai1, ai2, episode) {
 // ===== ENDPOINTS =====
 
 app.post('/api/train/massive', async (req, res) => {
-  const { episodes = 100000 } = req.body;
+  const { episodes = 10000 } = req.body;
   if (trainingStatus.running) { return res.json({ error: 'Already running' }); }
   trainingStatus.running = true;
   trainingStatus.episode = 1;
