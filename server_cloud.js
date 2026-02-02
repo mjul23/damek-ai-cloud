@@ -101,111 +101,75 @@ function getAllMoves(player, type, board) { const all = []; for (let r = 0; r < 
 function executeMove(board, from, to) { const newBoard = board.map(row => [...row]); newBoard[to[0]][to[1]] = newBoard[from[0]][from[1]]; const captured = board[to[0]][to[1]]; newBoard[from[0]][from[1]] = null; return { board: newBoard, captured }; }
 
 // 🛡️ IA ANTI-PATTERN - STRATÉGIE DÉFENSIVE INVERSE
-class AntiAI {
+class IntelligentAI {
   constructor(player = 0) {
     this.player = player;
     this.qTable = {};
-    this.alpha = 0.5;  // Learning très rapide
+    this.alpha = 0.5;
     this.gamma = 0.99;
-    this.epsilon = 0.1;
-    
-    // Patterns de l'adversaire à ÉVITER
-    this.avoidPatterns = [
-      { from: [0,3], to: [0,2] },
-      { from: [1,3], to: [0,2] },
-      { from: [0,2], to: [0,1] },
-      { from: [1,2], to: [0,1] },
-      { from: [0,1], to: [0,0] },
-      { from: [1,1], to: [0,0] }
-    ];
+    this.epsilon = 0.15;
+    this.spyStart = player === 0 ? [0,0] : [7,7];
+    this.centerZone = [[3,3], [3,4], [4,3], [4,4]];
   }
 
-  getBoardHash(board) { 
-    let hash = ''; 
-    for (let r = 0; r < 8; r++) { 
-      for (let c = 0; c < 8; c++) { 
-        const p = board[r][c]; 
-        hash += p ? `${p.p}${p.spy ? 'S' : ''}` : '.'; 
-      } 
-    } 
-    return hash; 
-  }
+  getBoardHash(board) { let hash = ''; for (let r = 0; r < 8; r++) { for (let c = 0; c < 8; c++) { const p = board[r][c]; hash += p ? `${p.p}${p.spy ? 'S' : ''}` : '.'; } } return hash; }
   
-  scoreMove(move) {
-    let score = 10;  // Base score positif
-    
-    // 🛡️ ÉNORME PÉNALITÉ si c'est un pattern dangereux
-    for (let p of this.avoidPatterns) {
-      if (move.from[0] === p.from[0] && move.from[1] === p.from[1] &&
-          move.to[0] === p.to[0] && move.to[1] === p.to[1]) {
-        score -= 100000;  // JAMAIS ces moves!
+  findSpy(board, isOur) {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = board[r][c];
+        if (p && p.spy && p.p === (isOur ? this.player : 1 - this.player)) return [r, c];
       }
     }
-    
-    // ✅ BONUS pour moves défensifs (rester en bas)
-    if (move.from[0] >= 5 && move.to[0] >= 4) {
-      score += 5000;  // Rester en défense
+    return null;
+  }
+  
+  scoreMove(board, move) {
+    let score = 10;
+    if (move.cap && move.cap.spy && move.cap.p !== this.player) { score += 100000; }
+    if (move.cap && move.cap.spy && move.cap.p === this.player) { score -= 100000; }
+    if (move.cap && !move.cap.spy) { score += 500; }
+    const ourSpy = this.findSpy(board, true);
+    if (ourSpy) {
+      const distFromStart = Math.abs(ourSpy[0] - this.spyStart[0]) + Math.abs(ourSpy[1] - this.spyStart[1]);
+      if (distFromStart <= 1) { score -= 1000; }
+      for (let z of this.centerZone) { if (ourSpy[0] === z[0] && ourSpy[1] === z[1]) { score += 5000; } }
     }
-    
-    // ✅ BONUS pour captures
-    if (move.cap) {
-      score += 10000;
+    const oppSpy = this.findSpy(board, false);
+    if (oppSpy) {
+      const dBef = Math.abs(move.from[0] - oppSpy[0]) + Math.abs(move.from[1] - oppSpy[1]);
+      const dAft = Math.abs(move.to[0] - oppSpy[0]) + Math.abs(move.to[1] - oppSpy[1]);
+      if (dAft < dBef) { score += 100; }
     }
-    
-    // ❌ PÉNALITÉ pour avancer vers le haut (zone dangereuse)
-    if (move.to[0] <= 2) {
-      score -= 1000;
-    }
-    
-    // ✅ BONUS pour avancer vers l'adversaire en bas
-    if (move.to[0] >= 6) {
-      score += 2000;
-    }
-    
+    if (this.player === 0 && move.to[0] > move.from[0]) { score += 5; }
+    else if (this.player === 1 && move.to[0] < move.from[0]) { score += 5; }
     return score;
   }
   
-  chooseAction(board, moves) { 
-    if (!moves.length) return null; 
-    if (Math.random() < this.epsilon) { 
-      return moves[Math.floor(Math.random() * moves.length)]; 
-    } 
-    
-    let bestMove = moves[0]; 
-    let bestScore = this.scoreMove(moves[0]); 
-    
-    for (let move of moves) { 
-      const score = this.scoreMove(move); 
-      if (score > bestScore) { 
-        bestScore = score; 
-        bestMove = move; 
-      } 
-    } 
-    
-    return bestMove; 
+  chooseAction(board, moves) {
+    if (!moves.length) return null;
+    if (Math.random() < this.epsilon) { return moves[Math.floor(Math.random() * moves.length)]; }
+    let bestMove = moves[0];
+    let bestScore = this.scoreMove(board, moves[0]);
+    for (let m of moves) { const s = this.scoreMove(board, m); if (s > bestScore) { bestScore = s; bestMove = m; } }
+    return bestMove;
   }
   
-  learn(stateBefore, move, reward, stateAfter) { 
-    const key = `${stateBefore}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`; 
-    const currentQ = this.qTable[key] || 0; 
-    let maxQ = 0; 
-    
-    for (let k in this.qTable) { 
-      if (k.startsWith(stateAfter + ':')) { 
-        maxQ = Math.max(maxQ, this.qTable[k]); 
-      } 
-    } 
-    
-    const newQ = currentQ + this.alpha * (reward + this.gamma * maxQ - currentQ); 
-    this.qTable[key] = newQ; 
+  learn(stateBefore, move, reward, stateAfter) {
+    const key = `${stateBefore}:${move.from[0]},${move.from[1]},${move.to[0]},${move.to[1]}`;
+    const currentQ = this.qTable[key] || 0;
+    let maxQ = 0;
+    for (let k in this.qTable) { if (k.startsWith(stateAfter + ':')) { maxQ = Math.max(maxQ, this.qTable[k]); } }
+    const newQ = currentQ + this.alpha * (reward + this.gamma * maxQ - currentQ);
+    this.qTable[key] = newQ;
   }
   
   toJSON() { return JSON.stringify(this.qTable); }
   fromJSON(json) { try { this.qTable = JSON.parse(json); } catch (e) { this.qTable = {}; } }
 }
 
-let ai1 = new AntiAI(0);
-let ai2 = new AntiAI(1);
+let ai1 = new IntelligentAI(0);
+let ai2 = new IntelligentAI(1);
 
 loadModelsFromSupabase().then(models => {
   if (models.ai1) ai1.fromJSON(models.ai1);
